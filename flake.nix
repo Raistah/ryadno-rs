@@ -27,7 +27,6 @@
         toolchain
         pkgs.rust-analyzer-unwrapped
         pkgs.cargo-watch
-        pkgs.sqlx-cli
       ];
 
       RUST_SRC_PATH = "${toolchain}/lib/rustlib/src/rust/library";

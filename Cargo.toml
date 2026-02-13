@@ -1,4 +1,4 @@
 [workspace]
 resolver = "3"
-members = ["ryadno"]
+members = ["example/fullPanel","ryadno"]
 exclude = ["examples"]
