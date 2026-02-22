@@ -1,27 +1,25 @@
-use axum::{
-    Form, Router,
-    extract::Request,
-    middleware::{self, Next},
-    response::Response,
-    routing::{get, post},
-};
+use axum::{Router, extract::Request, middleware::Next, response::Response};
 use minijinja::{Environment, path_loader};
 use ryadno::{
     PanelBuilder,
-    structs::register_page::{RegisterPage, RegisterPageForm},
+    structs::register_page::{BaseRegistrationPage, RegisterPageForm},
 };
 
 #[tokio::main]
 async fn main() {
     let mut env = Environment::new();
     env.set_loader(path_loader("templates"));
-
-    let mut register_page = RegisterPage::new("register-page.jinja".to_string(), async |form: String| {Ok(())}, None);
+    let registration_page = BaseRegistrationPage::new(
+        async |form: RegisterPageForm| {
+            println!("{:?}", form);
+            Ok(())
+        },
+        "register-page.jinja".to_string(),
+    );
 
     let router = Router::new().merge(
         PanelBuilder::new()
-            .set_auth_middleware(middleware::from_fn(auth_middleware))
-            .set_register_page(register_page)
+            .with_registration(registration_page)
             .build(env),
     );
 

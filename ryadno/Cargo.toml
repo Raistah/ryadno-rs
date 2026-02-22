@@ -8,7 +8,7 @@ name = "make"
 path = "src/bin/make.rs"
 
 [dependencies]
-axum = "0.8.8"
+axum = { version = "0.8.8", features = ["form"] }
 axum_csrf = { version = "0.11.0", features = ["layer"] }
 clap = { version = "4.5.58", features = ["derive"] }
 futures = "0.3.31"
