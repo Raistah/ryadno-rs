@@ -9,11 +9,16 @@ path = "src/bin/make.rs"
 
 [dependencies]
 axum = "0.8.8"
+axum_csrf = { version = "0.11.0", features = ["layer"] }
 clap = { version = "4.5.58", features = ["derive"] }
 futures = "0.3.31"
 include_dir = "0.7.4"
 minijinja = { version = "2.15.1", features = ["builtins", "multi_template", "serde", "debug", "std_collections", "loader", "urlencode", "json", "loop_controls", "stacker", "speedups"] }
+serde = { version = "1.0.228", features = ["derive"] }
 tower = {version="0.5.3", features= ["util"]}
 tower-http = {version="0.6.8", features= ["trace"]}
 tower-layer = "0.3.3"
 tower-service = "0.3.3"
+tower-sessions = "0.15.0"
+tower-sessions-redis-store = "0.16.0"
+validator = { version = "0.20.0", features = ["derive"] }
