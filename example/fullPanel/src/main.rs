@@ -15,6 +15,7 @@ async fn main() {
             Ok(())
         },
         "register-page.jinja".to_string(),
+        None
     );
 
     let router = Router::new().merge(
