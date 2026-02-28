@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::{Router, extract::Request, middleware::Next, response::Response};
 use minijinja::{Environment, path_loader};
 use ryadno::{
@@ -9,6 +11,7 @@ use ryadno::{
 async fn main() {
     let mut env = Environment::new();
     env.set_loader(path_loader("templates"));
+    let env = Arc::new(env);
     let registration_page = BaseRegistrationPage::new(
         async |form: RegisterPageForm| {
             println!("{:?}", form);

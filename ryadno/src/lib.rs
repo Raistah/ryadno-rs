@@ -25,12 +25,14 @@ impl PanelBuilder {
         }
     }
 
-    pub fn build(self, env: Environment<'static>) -> axum::Router {
+    pub fn build(self, env: Arc<Environment<'static>>) -> axum::Router {
         let mut router = axum::Router::new();
         let mut state = PanelState {
             mjenv: env,
             register_page_config: None,
         };
+
+        let template = state.mjenv.get_template("hehe");
 
         if let Some(registration_page) = &self.registration_page {
             router = self.add_registration(router, registration_page.clone());
@@ -68,7 +70,7 @@ impl PanelBuilder {
 
 #[derive(Clone)]
 pub struct PanelState {
-    mjenv: Environment<'static>,
+    mjenv: Arc<Environment<'static>>,
     register_page_config: Option<RegisterPageConfig>,
 }
 
