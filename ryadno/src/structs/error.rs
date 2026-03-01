@@ -7,6 +7,6 @@ pub enum Error {
     #[error("Validation error occured")]
     ValidationErrors(#[from] ValidationErrors),
 
-    #[error("Error \"{0}\" occured")]
+    #[error("0")]
     Message(String),
 }

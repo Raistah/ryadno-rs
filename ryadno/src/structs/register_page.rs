@@ -86,7 +86,7 @@ where
 #[derive(Debug, Serialize, Deserialize, Validate)]
 pub struct RegisterPageForm {
     #[validate(length(min = 1, max = 20))]
-    pub login: String,
+    pub email: String,
     #[validate(length(min = 5, max = 30))]
     pub password: String,
     #[validate(must_match(other = "password"))]

@@ -4,11 +4,12 @@ use axum::{
     Extension,
     body::Body,
     http::{Request, StatusCode},
-    response::IntoResponse,
+    response::Html,
+    routing::get,
 };
-use minijinja::Environment;
+use minijinja::{Environment, context};
 
-use crate::structs::register_page::{BaseRegistrationPage, RegistrationPage};
+use crate::structs::register_page::RegistrationPage;
 
 pub mod structs;
 
@@ -29,10 +30,7 @@ impl PanelBuilder {
         let mut router = axum::Router::new();
         let mut state = PanelState {
             mjenv: env,
-            register_page_config: None,
         };
-
-        let template = state.mjenv.get_template("hehe");
 
         if let Some(registration_page) = &self.registration_page {
             router = self.add_registration(router, registration_page.clone());
@@ -54,13 +52,21 @@ impl PanelBuilder {
         mut router: axum::Router,
         registration_page: Arc<dyn RegistrationPage>,
     ) -> axum::Router {
+        let registration_page_clone = registration_page.clone();
         router = router.route(
             &format!("/{}/{}", self.prefix, registration_page.get_path()),
-            axum::routing::post(async move |req: Request<Body>| {
+            get(async move |Extension(panel_state): Extension<PanelState>| {
+                match registration_page_clone.render_page(panel_state.mjenv, context! {}) {
+                    Ok(v) => (StatusCode::OK, Html(v)),
+                    Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, Html("".to_string())),
+                }
+            })
+            .post(async move |req: Request<Body>| {
                 let registration_page = registration_page.clone();
-                let result = async move { registration_page.handle_registration(req).await }.await;
-
-                StatusCode::OK
+                match async move { registration_page.handle_registration(req).await }.await {
+                    Ok(()) => (StatusCode::OK, "".to_string()),
+                    Err(err) => (StatusCode::BAD_REQUEST, err.to_string()),
+                }
             }),
         );
 
@@ -71,11 +77,4 @@ impl PanelBuilder {
 #[derive(Clone)]
 pub struct PanelState {
     mjenv: Arc<Environment<'static>>,
-    register_page_config: Option<RegisterPageConfig>,
-}
-
-#[derive(Clone)]
-pub struct RegisterPageConfig {
-    template: String,
-    handler: Arc<dyn RegistrationPage>,
 }
