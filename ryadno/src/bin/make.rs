@@ -1,4 +1,7 @@
-use std::{fs, path::{Path, PathBuf}};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use clap::{Parser, Subcommand};
 use include_dir::{Dir, DirEntry, File, include_dir};
@@ -8,7 +11,7 @@ pub static TEMPLATES_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/src/templa
 fn main() {
     let cli = Cli::parse();
     match &cli.command {
-        Commands::PublishTemplates => match publish_templates() {
+        Commands::PublishTemplates => match publish_templates(&cli.force) {
             Ok(_) => (),
             Err(err) => {
                 eprintln!("Error: {err}")
@@ -19,6 +22,8 @@ fn main() {
 
 #[derive(Clone, Parser)]
 struct Cli {
+    #[arg(short)]
+    force: bool,
     #[command(subcommand)]
     command: Commands,
 }
@@ -28,10 +33,10 @@ enum Commands {
     PublishTemplates,
 }
 
-fn publish_templates() -> Result<(), String> {
+fn publish_templates(force: &bool) -> Result<(), String> {
     let dest_path = Path::new("./templates");
 
-    if dest_path.exists() {
+    if dest_path.exists() && !*force {
         return Err(
             "Templates directory already exists. Skipping to avoid overwriting.".to_string(),
         );
@@ -43,15 +48,19 @@ fn publish_templates() -> Result<(), String> {
     Ok(())
 }
 
-fn publish_templates_iter_entries(base_path: PathBuf, entries: &[DirEntry<'_>]) -> Result<(), String> {
+fn publish_templates_iter_entries(
+    base_path: PathBuf,
+    entries: &[DirEntry<'_>],
+) -> Result<(), String> {
     for entry in entries {
         match entry {
             DirEntry::File(file) => {
-            	fs::write(base_path.join(file.path()), file.contents()).map_err(|err| err.to_string())?;
+                fs::write(base_path.join(file.path()), file.contents())
+                    .map_err(|err| err.to_string())?;
             }
             DirEntry::Dir(dir) => {
-            	fs::create_dir_all(base_path.join(dir.path())).map_err(|err| err.to_string())?;
-            	publish_templates_iter_entries(base_path.clone(), &dir.entries())?
+                fs::create_dir_all(base_path.join(dir.path())).map_err(|err| err.to_string())?;
+                publish_templates_iter_entries(base_path.clone(), &dir.entries())?
             }
         }
     }
