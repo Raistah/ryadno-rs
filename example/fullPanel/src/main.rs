@@ -7,6 +7,11 @@ use ryadno::{
     structs::register_page::{BaseRegistrationPage, RegisterPageForm},
 };
 
+#[derive(Clone)]
+struct AppState {
+    redis: Option<()>,
+}
+
 #[tokio::main]
 async fn main() {
     let mut env = Environment::new();
@@ -18,10 +23,12 @@ async fn main() {
             Ok(())
         },
         "register-page.jinja".to_string(),
-        None
+        None,
     );
 
-    let router = Router::new().merge(
+    // let state = Arc::new();
+
+    let router = Router::new().with_state(AppState { redis: None }).merge(
         PanelBuilder::new()
             .with_registration(registration_page)
             .build(env),
