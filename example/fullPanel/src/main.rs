@@ -17,22 +17,25 @@ async fn main() {
     let mut env = Environment::new();
     env.set_loader(path_loader("templates"));
     let env = Arc::new(env);
-    let registration_page = BaseRegistrationPage::new(
-        async |form: RegisterPageForm| {
-            println!("{:?}", form);
-            Ok(())
-        },
-        "register-page.jinja".to_string(),
-        None,
-    );
+    // let registration_page = BaseRegistrationPage::new(
+    //     async |form: RegisterPageForm| {
+    //         println!("{:?}", form);
+    //         Ok(())
+    //     },
+    //     "register-page.jinja".to_string(),
+    //     None,
+    // );
 
-    // let state = Arc::new();
+    // // let state = Arc::new();
 
-    let router = Router::new().with_state(AppState { redis: None }).merge(
-        PanelBuilder::new()
-            .with_registration(registration_page)
-            .build(env),
-    );
+    // let router = Router::new().with_state(AppState { redis: None }).merge(
+    //     PanelBuilder::new()
+    //         .with_registration(registration_page)
+    //         .build(env),
+    // );
+    let router = Router::new().route("/", get(|| {
+
+    }));
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     axum::serve(listener, router).await.unwrap();

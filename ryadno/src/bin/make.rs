@@ -34,7 +34,7 @@ enum Commands {
 }
 
 fn publish_templates(force: &bool) -> Result<(), String> {
-    let dest_path = Path::new("./templates");
+    let dest_path = Path::new("./templates/ryadno");
 
     if dest_path.exists() && !*force {
         return Err(
