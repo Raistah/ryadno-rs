@@ -1,50 +1,37 @@
 use std::sync::Arc;
 
-use axum::{Router, extract::Request, middleware::Next, response::Response};
-use minijinja::{Environment, path_loader};
-use ryadno::{
-    PanelBuilder,
-    structs::register_page::{BaseRegistrationPage, RegisterPageForm},
-};
-
-#[derive(Clone)]
-struct AppState {
-    redis: Option<()>,
-}
+use axum::{Extension, Router, http::StatusCode, response::Html, routing::get};
+use minijinja::{Environment, context, path_loader};
+use ryadno::fields::{Field, text_input::TextField};
 
 #[tokio::main]
 async fn main() {
     let mut env = Environment::new();
     env.set_loader(path_loader("templates"));
     let env = Arc::new(env);
-    // let registration_page = BaseRegistrationPage::new(
-    //     async |form: RegisterPageForm| {
-    //         println!("{:?}", form);
-    //         Ok(())
-    //     },
-    //     "register-page.jinja".to_string(),
-    //     None,
-    // );
+    let router = Router::new()
+        .route(
+            "/",
+            get(async |Extension(mjenv): Extension<Arc<Environment>>| {
+                let mut field = TextField::make("test".to_string());
+                // let context = field.prepare_context(serde_json::Value::Null);
+                let context = context! {
+                	state_path => "test"
+                };
+                let html = field.to_html(mjenv.as_ref(), context).unwrap();
 
-    // // let state = Arc::new();
+                let page_templ = mjenv.get_template("ryadno/base.jinja").unwrap();
+                let page = page_templ
+                    .render(context! {
+                        html => html
+                    })
+                    .unwrap();
 
-    // let router = Router::new().with_state(AppState { redis: None }).merge(
-    //     PanelBuilder::new()
-    //         .with_registration(registration_page)
-    //         .build(env),
-    // );
-    let router = Router::new().route("/", get(|| {
-
-    }));
+                (StatusCode::OK, Html(page))
+            }),
+        )
+        .layer(Extension(env));
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     axum::serve(listener, router).await.unwrap();
-}
-
-async fn auth_middleware(request: Request, next: Next) -> Response {
-    println!("I don't care about security!!");
-
-    let response = next.run(request).await;
-
-    response
 }

@@ -11,8 +11,9 @@ use minijinja::{Environment, context};
 
 use crate::structs::register_page::RegistrationPage;
 
-pub mod structs;
 pub mod fields;
+pub mod structs;
+pub mod utils;
 
 pub struct PanelBuilder {
     pub prefix: String,

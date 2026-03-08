@@ -1,0 +1,13 @@
+{% extends "ryadno/fields/base.jinja" %}
+{% block field_body %}
+	<label data-signals="{_value: null}" for="{{state_path}}">
+		<span class="block">{{label}}</span>
+		<input
+			type="{{input_type}}"
+			name="{{state_path}}"
+			data-bind="_value"
+			data-on:input__debounce.500ms="console.log($_value); $_value += '|hehe'"
+		/>
+		<p data-text="$_value"></p>
+	</label>
+{% endblock %}

@@ -2,10 +2,11 @@ use std::{fmt::Display, path::PathBuf};
 
 use minijinja::context;
 
-use crate::fields::Field;
+use crate::{fields::Field, utils::capitalize_first};
 
 pub struct TextField {
     name: String,
+    label: String,
     live: bool,
     hidden: bool,
     input_type: TextFieldType,
@@ -55,8 +56,11 @@ impl TextField {
 
 impl Field for TextField {
     fn make(name: String) -> Self {
+        let label = capitalize_first(name.as_str());
+
         Self {
             name,
+            label,
             live: false,
             hidden: false,
             input_type: TextFieldType::Text,
@@ -68,10 +72,20 @@ impl Field for TextField {
         context! {}
     }
 
-    fn to_html(&self, mjenv: &minijinja::Environment<'static>) -> Result<String, minijinja::Error> {
+    fn to_html(
+        &self,
+        mjenv: &minijinja::Environment<'_>,
+        context: minijinja::Value,
+    ) -> Result<String, minijinja::Error> {
         mjenv
-            .get_template("ryadno/fields/text-field.jinja")?
-            .render(context! {})
+            .get_template("ryadno/fields/text-input.jinja")?
+            .render(context! {
+                label => self.label,
+                name => self.name,
+                hidden => self.hidden,
+                input_type => self.input_type.to_string(),
+                ..context,
+            })
     }
 
     fn validate(&self, value: serde_json::Value) -> Result<(), Vec<(String, String)>> {

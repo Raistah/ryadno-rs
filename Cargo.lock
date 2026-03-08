@@ -520,6 +520,7 @@ dependencies = [
  "axum",
  "minijinja",
  "ryadno",
+ "serde_json",
  "tokio",
  "validator",
 ]
