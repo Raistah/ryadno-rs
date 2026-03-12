@@ -1,5 +1,11 @@
 <div
-	class="{{ 'hidden' if hidden }}"
-	data-signals="{}">
+	class="field-{{ uuid }}"
+	data-signals="{
+		'{{uuid}}': {
+			value: {{value}},
+			path: '{{state_path}}'
+		}
+	}"
+>
 	{% block field_body %} {% endblock %}
-</ div>
+</div>

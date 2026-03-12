@@ -1,13 +1,23 @@
 {% extends "ryadno/fields/base.jinja" %}
 {% block field_body %}
-	<label data-signals="{_value: null}" for="{{state_path}}">
+	<label>
 		<span class="block">{{label}}</span>
 		<input
 			type="{{input_type}}"
-			name="{{state_path}}"
-			data-bind="_value"
-			data-on:input__debounce.500ms="console.log($_value); $_value += '|hehe'"
+			data-bind="{{uuid}}.value"
+			data-on:input__debounce.500ms="
+				@post(
+					`{{form_context.update_endpoint}}`,
+					{
+						headers: {{form_context.headers | replace('\"', '\'')}},
+						payload: {
+							uuid: '{{uuid}}',
+							path: ${{uuid}}.path,
+							value: ${{uuid}}.value,
+						}
+					}
+				)
+			"
 		/>
-		<p data-text="$_value"></p>
 	</label>
 {% endblock %}

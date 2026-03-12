@@ -17,6 +17,7 @@
     toolchain = pkgs.rust-bin.fromRustupToolchainFile ./toolchain.toml;
   in {
     devShells.${system}.default = pkgs.mkShell {
+    	name= "ryadno";
       buildInputs = [
         pkgs.pkg-config
         pkgs.cmake

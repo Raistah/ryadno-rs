@@ -1,8 +1,8 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use axum::{Extension, Router, http::StatusCode, response::Html, routing::get};
 use minijinja::{Environment, context, path_loader};
-use ryadno::fields::{Field, text_input::TextField};
+use ryadno::{fields::{Field, text_input::TextField}, form::FormContext};
 
 #[tokio::main]
 async fn main() {
@@ -13,14 +13,17 @@ async fn main() {
         .route(
             "/",
             get(async |Extension(mjenv): Extension<Arc<Environment>>| {
-                let mut field = TextField::make("test".to_string());
-                // let context = field.prepare_context(serde_json::Value::Null);
-                let context = context! {
-                	state_path => "test"
+                let field = TextField::make("test".to_string());
+                let mut headers: HashMap<String, String> = HashMap::new();
+                headers.insert("Content-Type".to_string(), "application/json".to_string());
+                let form_context = FormContext {
+               		update_endpoint: "/form/update/".to_string(),
+                	headers: headers,
+                	extra: HashMap::new()
                 };
-                let html = field.to_html(mjenv.as_ref(), context).unwrap();
+                let html = field.to_html(mjenv.as_ref(), "test".to_string(), None, &form_context).unwrap();
 
-                let page_templ = mjenv.get_template("ryadno/base.jinja").unwrap();
+                let page_templ = mjenv.get_template("base.jinja").unwrap();
                 let page = page_templ
                     .render(context! {
                         html => html

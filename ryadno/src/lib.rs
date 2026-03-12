@@ -14,6 +14,7 @@ use crate::structs::register_page::RegistrationPage;
 pub mod fields;
 pub mod structs;
 pub mod utils;
+pub mod form;
 
 pub struct PanelBuilder {
     pub prefix: String,
