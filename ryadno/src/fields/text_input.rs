@@ -1,11 +1,13 @@
-use std::{collections::HashMap, fmt::Display, path::PathBuf};
+use std::fmt::Display;
 
 use minijinja::context;
-use serde_json::json;
+use rkyv::{Archive};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{fields::Field, form::FormContext, utils::capitalize_first};
+use crate::{fields::{Field, prepare_value_for_datastar}, form::FormContext, utils::capitalize_first};
 
+#[derive(Archive, rkyv::Serialize, rkyv::Deserialize, Debug)]
 pub struct TextField {
 	uuid: String,
     name: String,
@@ -16,6 +18,19 @@ pub struct TextField {
 }
 
 impl TextField {
+	pub fn make(name: String) -> Self {
+        let label = capitalize_first(name.as_str());
+
+        Self {
+       		uuid: Uuid::new_v4().to_string(),
+            name,
+            label,
+            live: false,
+            hidden: false,
+            input_type: TextFieldType::Text,
+        }
+    }
+
     pub fn live(mut self) -> Self {
         self.live = true;
         self
@@ -58,19 +73,6 @@ impl TextField {
 }
 
 impl Field for TextField {
-    fn make(name: String) -> Self {
-        let label = capitalize_first(name.as_str());
-
-        Self {
-       		uuid: Uuid::new_v4().to_string(),
-            name,
-            label,
-            live: false,
-            hidden: false,
-            input_type: TextFieldType::Text,
-        }
-    }
-
     fn after_update(
         &mut self,
         value: serde_json::Value,
@@ -88,15 +90,8 @@ impl Field for TextField {
         from_context: &FormContext,
     ) -> Result<String, minijinja::Error> {
         let value = match value {
-            None => "null",
-            Some(serde_json::Value::Null) => "null",
-            Some(serde_json::Value::Number(v)) => &format!("{v}"),
-            Some(serde_json::Value::String(v)) => &format!("'{v}'"),
-            Some(serde_json::Value::Bool(v)) => &format!("{v}"),
-            Some(serde_json::Value::Array(v)) => &format!("{}", serde_json::to_string(&v).unwrap()),
-            Some(serde_json::Value::Object(v)) => {
-                &format!("{}", serde_json::to_string(&v).unwrap())
-            }
+            None => "null".to_string(),
+            Some(v) => prepare_value_for_datastar(&v)
         };
 
         mjenv
@@ -121,15 +116,16 @@ impl Field for TextField {
         self.live
     }
 
-    fn get_name(&self) -> &String {
+    fn get_name(&self) -> &str {
         &self.name
     }
 
-    fn get_uuid(&self) -> &String {
+    fn get_uuid(&self) -> &str {
     	&self.uuid
     }
 }
 
+#[derive(Archive, rkyv::Serialize, rkyv::Deserialize, Debug)]
 pub enum TextFieldType {
     Text,
     Email,

@@ -1,12 +1,15 @@
 pub mod text_input;
+pub mod select;
+
+use std::fmt::Debug;
 
 use minijinja::Environment;
+use rkyv::Archive;
 use serde_json::Value;
 
 use crate::form::FormContext;
 
-pub trait Field {
-    fn make(name: String) -> Self;
+pub trait Field: Archive + Debug {
     fn after_update(&mut self, value: Value, old_value: Value, from_context: &FormContext);
     fn to_html(
         &self,
@@ -16,7 +19,18 @@ pub trait Field {
         from_context: &FormContext,
     ) -> Result<String, minijinja::Error>;
     fn validate(&self, value: Value) -> Result<(), Vec<(String, String)>>;
-    fn get_name(&self) -> &String;
-    fn get_uuid(&self) -> &String;
+    fn get_name(&self) -> &str;
+    fn get_uuid(&self) -> &str;
     fn is_live(&self) -> bool;
+}
+
+pub fn prepare_value_for_datastar(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::Null => "null".to_string(),
+        serde_json::Value::Number(v) => format!("{v}"),
+        serde_json::Value::String(v) => format!("'{v}'"),
+        serde_json::Value::Bool(v) => format!("{v}"),
+        serde_json::Value::Array(v) => format!("{}", serde_json::to_string(&v).unwrap()),
+        serde_json::Value::Object(v) => format!("{}", serde_json::to_string(&v).unwrap()),
+    }
 }
