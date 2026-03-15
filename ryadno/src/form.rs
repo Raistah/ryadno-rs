@@ -30,57 +30,78 @@ impl FormBuilder {
     // }
 }
 
-#[derive(Archive, Serialize, Deserialize, Debug, PartialEq, Eq)]
-pub enum FieldTypes {
-    Text(TextField),
-}
-
-impl FieldTypes {
-    fn as_field(&self) -> &impl Field {
-        match self {
-            Self::Text(v) => v,
+macro_rules! register_field_type_enum {
+    ($enum_name:ident { $($variant:ident($struct:ty)),* $(,)? }) => {
+        #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, PartialEq, Eq)]
+        pub enum $enum_name {
+            $($variant($struct)),*
         }
-    }
+
+        // 1. Automatic conversion: TextField::make("...").into()
+        $(
+            impl From<$struct> for $enum_name {
+                fn from(v: $struct) -> Self {
+                    Self::$variant(v)
+                }
+            }
+        )*
+
+        // 3. Trait Dispatch
+        impl Field for $enum_name {
+            fn after_update(
+                &mut self,
+                value: serde_json::Value,
+                old_value: serde_json::Value,
+                from_context: &FormContext,
+            ) {
+                match self {
+                    $(Self::$variant(v) => v.after_update(value, old_value, from_context)),*
+                }
+            }
+
+            fn to_html(
+                &self,
+                mjenv: &minijinja::Environment<'_>,
+                state_path: String,
+                value: Option<serde_json::Value>,
+                from_context: &FormContext,
+            ) -> Result<String, minijinja::Error> {
+                match self {
+                    $(Self::$variant(v) => v.to_html(mjenv, state_path, value, from_context)),*
+                }
+            }
+
+            fn validate(&self, value: serde_json::Value) -> Result<(), Vec<(String, String)>> {
+                match self {
+                    $(Self::$variant(v) => v.validate(value)),*
+                }
+            }
+
+            fn is_live(&self) -> bool {
+                match self {
+                    $(Self::$variant(v) => v.is_live()),*
+                }
+            }
+
+            fn get_name(&self) -> &str {
+                match self {
+                    $(Self::$variant(v) => v.get_name()),*
+                }
+            }
+
+            fn get_uuid(&self) -> &str {
+                match self {
+                    $(Self::$variant(v) => v.get_uuid()),*
+                }
+            }
+        }
+    };
 }
 
-impl Field for FieldTypes {
-    fn after_update(
-        &mut self,
-        value: serde_json::Value,
-        old_value: serde_json::Value,
-        from_context: &FormContext,
-    ) {
-        match self {
-            Self::Text(v) => v.after_update(value, old_value, from_context),
-        };
-    }
-
-    fn to_html(
-        &self,
-        mjenv: &minijinja::Environment<'_>,
-        state_path: String,
-        value: Option<serde_json::Value>,
-        from_context: &FormContext,
-    ) -> Result<String, minijinja::Error> {
-        self.as_field()
-            .to_html(mjenv, state_path, value, from_context)
-    }
-
-    fn validate(&self, value: serde_json::Value) -> Result<(), Vec<(String, String)>> {
-        Ok(())
-    }
-
-    fn is_live(&self) -> bool {
-        self.as_field().is_live()
-    }
-
-    fn get_name(&self) -> &str {
-        self.as_field().get_name()
-    }
-
-    fn get_uuid(&self) -> &str {
-        self.as_field().get_uuid()
-    }
+register_field_type_enum! {
+	FieldTypes {
+		Text(TextField),
+	}
 }
 
 #[derive(serde::Serialize)]
@@ -137,7 +158,10 @@ mod test {
     #[test]
     fn test_rkyv_with_generic() {
         let form = Form {
-            schema: vec![FieldTypes::Text(TextField::make("text".to_string()))],
+            schema: vec![
+            	TextField::make("first_name".to_string()).into(),
+            	TextField::make("last_name".to_string()).into(),
+            ],
             update_endpoint: "".to_string(),
             uuid: "".to_string(),
             data: None,
