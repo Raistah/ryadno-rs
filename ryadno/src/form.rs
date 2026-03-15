@@ -32,7 +32,12 @@ impl FormBuilder {
 
 macro_rules! register_field_type_enum {
     ($enum_name:ident { $($variant:ident($struct:ty)),* $(,)? }) => {
-        #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, PartialEq, Eq)]
+		#[derive(
+			$crate::rkyv::Archive,
+			$crate::rkyv::Serialize,
+			$crate::rkyv::Deserialize,
+			Debug, PartialEq, Eq
+		)]
         pub enum $enum_name {
             $($variant($struct)),*
         }
@@ -50,8 +55,8 @@ macro_rules! register_field_type_enum {
         impl Field for $enum_name {
             fn after_update(
                 &mut self,
-                value: serde_json::Value,
-                old_value: serde_json::Value,
+                value: $crate::serde_json::Value,
+                old_value: $crate::serde_json::Value,
                 from_context: &FormContext,
             ) {
                 match self {
@@ -61,17 +66,17 @@ macro_rules! register_field_type_enum {
 
             fn to_html(
                 &self,
-                mjenv: &minijinja::Environment<'_>,
+                mjenv: &$crate::minijinja::Environment<'_>,
                 state_path: String,
-                value: Option<serde_json::Value>,
+                value: Option<$crate::serde_json::Value>,
                 from_context: &FormContext,
-            ) -> Result<String, minijinja::Error> {
+            ) -> Result<String, $crate::minijinja::Error> {
                 match self {
                     $(Self::$variant(v) => v.to_html(mjenv, state_path, value, from_context)),*
                 }
             }
 
-            fn validate(&self, value: serde_json::Value) -> Result<(), Vec<(String, String)>> {
+            fn validate(&self, value: $crate::serde_json::Value) -> Result<(), Vec<(String, String)>> {
                 match self {
                     $(Self::$variant(v) => v.validate(value)),*
                 }
@@ -99,9 +104,22 @@ macro_rules! register_field_type_enum {
 }
 
 register_field_type_enum! {
-	FieldTypes {
-		Text(TextField),
+    FieldTypes {
+        Text(TextField),
+    }
+}
+
+macro_rules! to_bytes {
+	($from:expr) => {
+		$crate::rkyv::to_bytes::<$crate::rkyv::rancor::Error>($from)
 	}
+}
+
+macro_rules! from_types {
+    ($type:ty, $bytes:expr) => {
+        // We use $crate to point to your re-exports
+        $crate::rkyv::from_bytes::<$type, $crate::rkyv::rancor::Error>($bytes)
+    }
 }
 
 #[derive(serde::Serialize)]
@@ -151,25 +169,22 @@ impl<D: Fallible + ?Sized> Deserialize<ValueWrapper, D> for ArchivedString {
 
 #[cfg(test)]
 mod test {
-    use rkyv::{from_bytes, rancor, to_bytes};
-
     use super::*;
 
     #[test]
     fn test_rkyv_with_generic() {
         let form = Form {
             schema: vec![
-            	TextField::make("first_name".to_string()).into(),
-            	TextField::make("last_name".to_string()).into(),
+                TextField::make("first_name".to_string()).into(),
+                TextField::make("last_name".to_string()).into(),
             ],
             update_endpoint: "".to_string(),
             uuid: "".to_string(),
             data: None,
         };
 
-        let bytes = to_bytes::<rancor::Error>(&form).unwrap();
-        let restored_form: Form<FieldTypes> =
-            from_bytes::<Form<FieldTypes>, rancor::Error>(&bytes).unwrap();
+        let bytes = to_bytes!(&form).unwrap();
+        let restored_form = from_types!(Form<FieldTypes>, &bytes).unwrap();
         assert_eq!(form, restored_form);
     }
 }

@@ -16,6 +16,11 @@ pub mod structs;
 pub mod utils;
 pub mod form;
 
+// reexport
+pub use rkyv;
+pub use serde_json;
+pub use minijinja;
+
 pub struct PanelBuilder {
     pub prefix: String,
     pub registration_page: Option<Arc<dyn RegistrationPage>>,
