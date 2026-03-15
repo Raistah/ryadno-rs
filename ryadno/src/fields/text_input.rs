@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::{fields::{Field, prepare_value_for_datastar}, form::FormContext, utils::capitalize_first};
 
-#[derive(Archive, rkyv::Serialize, rkyv::Deserialize, Debug)]
+#[derive(Archive, rkyv::Serialize, rkyv::Deserialize, Debug, PartialEq, Eq)]
 pub struct TextField {
 	uuid: String,
     name: String,
@@ -125,7 +125,7 @@ impl Field for TextField {
     }
 }
 
-#[derive(Archive, rkyv::Serialize, rkyv::Deserialize, Debug)]
+#[derive(Archive, rkyv::Serialize, rkyv::Deserialize, Debug, PartialEq, Eq)]
 pub enum TextFieldType {
     Text,
     Email,

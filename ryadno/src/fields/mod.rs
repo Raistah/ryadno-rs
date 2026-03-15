@@ -9,7 +9,7 @@ use serde_json::Value;
 
 use crate::form::FormContext;
 
-pub trait Field: Archive + Debug {
+pub trait Field: Archive + Debug + Eq + PartialEq {
     fn after_update(&mut self, value: Value, old_value: Value, from_context: &FormContext);
     fn to_html(
         &self,
