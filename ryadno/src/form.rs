@@ -18,18 +18,6 @@ pub struct Form<T: Field + Archive + Debug + Eq + PartialEq> {
     pub data: Option<ValueWrapper>,
 }
 
-pub struct FormBuilder {}
-
-impl FormBuilder {
-    // pub fn new() -> Self {
-    //     todo!()
-    // }
-
-    // pub fn build() -> Form {
-    //     todo!()
-    // }
-}
-
 macro_rules! register_field_type_enum {
     ($enum_name:ident { $($variant:ident($struct:ty)),* $(,)? }) => {
 		#[derive(
