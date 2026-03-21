@@ -103,7 +103,7 @@ macro_rules! to_bytes {
 	}
 }
 
-macro_rules! from_types {
+macro_rules! from_bytes {
     ($type:ty, $bytes:expr) => {
         // We use $crate to point to your re-exports
         $crate::rkyv::from_bytes::<$type, $crate::rkyv::rancor::Error>($bytes)
@@ -172,7 +172,7 @@ mod test {
         };
 
         let bytes = to_bytes!(&form).unwrap();
-        let restored_form = from_types!(Form<FieldTypes>, &bytes).unwrap();
+        let restored_form = from_bytes!(Form<FieldTypes>, &bytes).unwrap();
         assert_eq!(form, restored_form);
     }
 }
