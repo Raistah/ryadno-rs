@@ -4,7 +4,7 @@ use std::{
 };
 
 use clap::{Parser, Subcommand};
-use include_dir::{Dir, DirEntry, File, include_dir};
+use include_dir::{Dir, DirEntry, include_dir};
 
 pub static TEMPLATES_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/src/templates");
 

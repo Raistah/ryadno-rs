@@ -1,5 +1,6 @@
 use std::{collections::HashMap, fmt::Debug};
 
+use minijinja::context;
 use rkyv::{
     Archive, Deserialize, Serialize,
     rancor::{Fallible, Source},
@@ -16,6 +17,36 @@ pub struct Form<T: Field + Archive + Debug + Eq + PartialEq> {
     pub uuid: String,
     pub update_endpoint: String,
     pub data: Option<ValueWrapper>,
+}
+
+impl<T> Form<T>
+where
+    T: Field + Archive + Debug + Eq + PartialEq,
+{
+    fn to_html(&self, mjenv: &minijinja::Environment<'_>) -> Result<String, minijinja::Error> {
+        let mut rendered_fields = String::new();
+        let form_context = FormContext {
+            update_endpoint: self.update_endpoint.clone(),
+            headers: HashMap::new(),
+            extra: HashMap::new(),
+        };
+
+        for field in self.schema.iter() {
+            rendered_fields.push_str(
+                field
+                    .to_html(mjenv, field.get_name().to_string(), None, &form_context)?
+                    .as_str(),
+            );
+        }
+
+        mjenv.get_template("ryadno/form.jinja")?.render(context! {
+            html => rendered_fields
+        })
+    }
+
+    // fn get_data_by_path(&self) -> Option<&Value> {
+    //     todo!()
+    // }
 }
 
 macro_rules! register_field_type_enum {
@@ -98,16 +129,16 @@ register_field_type_enum! {
 }
 
 macro_rules! to_bytes {
-	($from:expr) => {
-		$crate::rkyv::to_bytes::<$crate::rkyv::rancor::Error>($from)
-	}
+    ($from:expr) => {
+        $crate::rkyv::to_bytes::<$crate::rkyv::rancor::Error>($from)
+    };
 }
 
 macro_rules! from_bytes {
     ($type:ty, $bytes:expr) => {
         // We use $crate to point to your re-exports
         $crate::rkyv::from_bytes::<$type, $crate::rkyv::rancor::Error>($bytes)
-    }
+    };
 }
 
 #[derive(serde::Serialize)]
@@ -157,6 +188,8 @@ impl<D: Fallible + ?Sized> Deserialize<ValueWrapper, D> for ArchivedString {
 
 #[cfg(test)]
 mod test {
+    use minijinja::{Environment, path_loader};
+
     use super::*;
 
     #[test]
@@ -174,5 +207,26 @@ mod test {
         let bytes = to_bytes!(&form).unwrap();
         let restored_form = from_bytes!(Form<FieldTypes>, &bytes).unwrap();
         assert_eq!(form, restored_form);
+    }
+
+    #[test]
+    fn test_form_to_html() {
+        let form: Form<FieldTypes> = Form {
+            schema: vec![
+                TextField::make("first_name".to_string()).into(),
+                TextField::make("last_name".to_string()).into(),
+            ],
+            update_endpoint: "".to_string(),
+            uuid: "".to_string(),
+            data: None,
+        };
+
+        let mut env = Environment::new();
+        env.set_loader(move |name| {
+            let real_name = name.replace("ryadno/", "");
+            path_loader("./src/templates")(real_name.as_str())
+        });
+
+        let _ = form.to_html(&env);
     }
 }

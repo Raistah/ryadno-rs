@@ -2,7 +2,6 @@ use std::fmt::Display;
 
 use minijinja::context;
 use rkyv::{Archive};
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{fields::{Field, prepare_value_for_datastar}, form::FormContext, utils::capitalize_first};
