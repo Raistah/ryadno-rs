@@ -1,14 +1,15 @@
 use std::fmt::Display;
 
+use serde::Serialize;
 use serde_json::Value;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct DataPath {
     segments: Vec<Segment>,
     is_absolute: bool,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub enum Segment {
     Index(usize),
     Key(String),

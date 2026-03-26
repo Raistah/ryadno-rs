@@ -9,7 +9,10 @@ use rkyv::{
 };
 use serde_json::Value;
 
-use crate::fields::{Field, text_input::TextField};
+use crate::{
+    fields::{Field, text_input::TextField},
+    structs::data_path::DataPath,
+};
 
 #[derive(Archive, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct Form<T: Field + Archive + Debug + Eq + PartialEq> {
@@ -31,22 +34,38 @@ where
             extra: HashMap::new(),
         };
 
-        for field in self.schema.iter() {
-            rendered_fields.push_str(
-                field
-                    .to_html(mjenv, field.get_name().to_string(), None, &form_context)?
-                    .as_str(),
-            );
+        match &self.data {
+            Some(value) => {
+                for field in self.schema.iter() {
+                    let state_path = DataPath::from(field.get_name());
+
+                    rendered_fields.push_str(
+                        field
+                            .to_html(
+                                mjenv,
+                                state_path.clone(),
+                                state_path.find_value(&value.0),
+                                &form_context,
+                            )?
+                            .as_str(),
+                    );
+                }
+            }
+            None => {
+                for field in self.schema.iter() {
+                    rendered_fields.push_str(
+                        field
+                            .to_html(mjenv, DataPath::from(field.get_name()), None, &form_context)?
+                            .as_str(),
+                    );
+                }
+            }
         }
 
         mjenv.get_template("ryadno/form.jinja")?.render(context! {
             html => rendered_fields
         })
     }
-
-    // fn get_data_by_path(&self) -> Option<&Value> {
-    //     todo!()
-    // }
 }
 
 macro_rules! register_field_type_enum {
@@ -61,7 +80,6 @@ macro_rules! register_field_type_enum {
             $($variant($struct)),*
         }
 
-        // 1. Automatic conversion: TextField::make("...").into()
         $(
             impl From<$struct> for $enum_name {
                 fn from(v: $struct) -> Self {
@@ -70,7 +88,6 @@ macro_rules! register_field_type_enum {
             }
         )*
 
-        // 3. Trait Dispatch
         impl Field for $enum_name {
             fn after_update(
                 &mut self,
@@ -86,8 +103,8 @@ macro_rules! register_field_type_enum {
             fn to_html(
                 &self,
                 mjenv: &$crate::minijinja::Environment<'_>,
-                state_path: String,
-                value: Option<$crate::serde_json::Value>,
+                state_path: DataPath,
+                value: Option<&$crate::serde_json::Value>,
                 from_context: &FormContext,
             ) -> Result<String, $crate::minijinja::Error> {
                 match self {
@@ -136,7 +153,6 @@ macro_rules! to_bytes {
 
 macro_rules! from_bytes {
     ($type:ty, $bytes:expr) => {
-        // We use $crate to point to your re-exports
         $crate::rkyv::from_bytes::<$type, $crate::rkyv::rancor::Error>($bytes)
     };
 }
@@ -189,6 +205,7 @@ impl<D: Fallible + ?Sized> Deserialize<ValueWrapper, D> for ArchivedString {
 #[cfg(test)]
 mod test {
     use minijinja::{Environment, path_loader};
+    use serde_json::json;
 
     use super::*;
 
@@ -218,7 +235,10 @@ mod test {
             ],
             update_endpoint: "".to_string(),
             uuid: "".to_string(),
-            data: None,
+            data: Some(ValueWrapper(json!({
+                "first_name": "hehe",
+                "last_name": "hoho"
+            }))),
         };
 
         let mut env = Environment::new();
@@ -227,6 +247,10 @@ mod test {
             path_loader("./src/templates")(real_name.as_str())
         });
 
-        let _ = form.to_html(&env);
+        let html = form.to_html(&env).unwrap();
+        assert!(html.contains("value: 'hehe'"));
+        assert!(html.contains("path: 'first_name'"));
+        assert!(html.contains("value: 'hoho'"));
+        assert!(html.contains("path: 'last_name'"));
     }
 }

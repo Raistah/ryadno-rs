@@ -4,7 +4,7 @@ use minijinja::context;
 use rkyv::{Archive};
 use uuid::Uuid;
 
-use crate::{fields::{Field, prepare_value_for_datastar}, form::FormContext, utils::capitalize_first};
+use crate::{fields::{Field, prepare_value_for_datastar}, form::FormContext, structs::data_path::DataPath, utils::capitalize_first};
 
 #[derive(Archive, rkyv::Serialize, rkyv::Deserialize, Debug, PartialEq, Eq)]
 pub struct TextField {
@@ -84,8 +84,8 @@ impl Field for TextField {
     fn to_html(
         &self,
         mjenv: &minijinja::Environment<'_>,
-        state_path: String,
-        value: Option<serde_json::Value>,
+        state_path: DataPath,
+        value: Option<&serde_json::Value>,
         from_context: &FormContext,
     ) -> Result<String, minijinja::Error> {
         let value = match value {
@@ -99,7 +99,7 @@ impl Field for TextField {
             	uuid => self.uuid,
                 label => self.label,
                 name => self.name,
-                state_path => state_path,
+                state_path => state_path.to_string(),
                 hidden => self.hidden,
                 input_type => self.input_type.to_string(),
                 value => value,
