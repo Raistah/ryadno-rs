@@ -1,4 +1,4 @@
-use std::{any::Any, collections::HashMap, fmt::Debug};
+use std::{collections::HashMap, fmt::Debug};
 
 use minijinja::context;
 use rkyv::{
@@ -9,10 +9,7 @@ use rkyv::{
 };
 use serde_json::Value;
 
-use crate::{
-    fields::{Field, text_input::TextField},
-    structs::data_path::DataPath,
-};
+use crate::{fields::Field, structs::data_path::DataPath};
 
 #[derive(Archive, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct Form<T: Field + Archive + Debug + Eq + PartialEq> {
@@ -50,7 +47,12 @@ where
                 for field in self.schema.iter() {
                     rendered_fields.push_str(
                         field
-                            .to_html(mjenv, DataPath::from(field.get_name()), None, &self.form_ctx)?
+                            .to_html(
+                                mjenv,
+                                DataPath::from(field.get_name()),
+                                None,
+                                &self.form_ctx,
+                            )?
                             .as_str(),
                     );
                 }
@@ -60,84 +62,6 @@ where
         mjenv.get_template("ryadno/form.jinja")?.render(context! {
             html => rendered_fields
         })
-    }
-}
-
-macro_rules! register_field_type_enum {
-    ($enum_name:ident { $($variant:ident($struct:ty)),* $(,)? }) => {
-		#[derive(
-			$crate::rkyv::Archive,
-			$crate::rkyv::Serialize,
-			$crate::rkyv::Deserialize,
-			Debug, PartialEq, Eq
-		)]
-        pub enum $enum_name {
-            $($variant($struct)),*
-        }
-
-        $(
-            impl From<$struct> for $enum_name {
-                fn from(v: $struct) -> Self {
-                    Self::$variant(v)
-                }
-            }
-        )*
-
-        impl Field for $enum_name {
-            fn after_update(
-                &mut self,
-                value: $crate::serde_json::Value,
-                old_value: $crate::serde_json::Value,
-                from_context: &FormContext,
-                runtime_ctx: Option<&dyn Any>
-            ) {
-                match self {
-                    $(Self::$variant(v) => v.after_update(value, old_value, from_context, runtime_ctx)),*
-                }
-            }
-
-            fn to_html(
-                &self,
-                mjenv: &$crate::minijinja::Environment<'_>,
-                state_path: DataPath,
-                value: Option<&$crate::serde_json::Value>,
-                from_context: &FormContext,
-            ) -> Result<String, $crate::minijinja::Error> {
-                match self {
-                    $(Self::$variant(v) => v.to_html(mjenv, state_path, value, from_context)),*
-                }
-            }
-
-            fn validate(&self, value: $crate::serde_json::Value) -> Result<(), Vec<(String, String)>> {
-                match self {
-                    $(Self::$variant(v) => v.validate(value)),*
-                }
-            }
-
-            fn is_live(&self) -> bool {
-                match self {
-                    $(Self::$variant(v) => v.is_live()),*
-                }
-            }
-
-            fn get_name(&self) -> &str {
-                match self {
-                    $(Self::$variant(v) => v.get_name()),*
-                }
-            }
-
-            fn get_uuid(&self) -> &str {
-                match self {
-                    $(Self::$variant(v) => v.get_uuid()),*
-                }
-            }
-        }
-    };
-}
-
-register_field_type_enum! {
-    FieldTypes {
-        Text(TextField),
     }
 }
 
@@ -202,6 +126,8 @@ impl<D: Fallible + ?Sized> Deserialize<ValueWrapper, D> for ArchivedString {
 mod test {
     use minijinja::{Environment, path_loader};
     use serde_json::json;
+
+    use crate::fields::{FieldTypes, text_input::TextField};
 
     use super::*;
 
