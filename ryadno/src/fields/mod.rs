@@ -1,7 +1,7 @@
 pub mod select;
 pub mod text_input;
 
-use std::fmt::Debug;
+use std::{any::Any, fmt::Debug};
 
 use minijinja::Environment;
 use rkyv::Archive;
@@ -10,7 +10,13 @@ use serde_json::Value;
 use crate::{form::FormContext, structs::data_path::DataPath};
 
 pub trait Field: Archive + Debug + Eq + PartialEq {
-    fn after_update(&mut self, value: Value, old_value: Value, from_context: &FormContext);
+    fn after_update(
+        &mut self,
+        value: Value,
+        old_value: Value,
+        from_context: &FormContext,
+        runtime_ctx: Option<&dyn Any>,
+    );
     fn to_html(
         &self,
         mjenv: &Environment<'_>,

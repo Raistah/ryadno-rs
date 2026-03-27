@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Debug};
+use std::{any::Any, collections::HashMap, fmt::Debug};
 
 use minijinja::context;
 use rkyv::{
@@ -18,7 +18,7 @@ use crate::{
 pub struct Form<T: Field + Archive + Debug + Eq + PartialEq> {
     pub schema: Vec<T>,
     pub uuid: String,
-    pub update_endpoint: String,
+    pub form_ctx: FormContext,
     pub data: Option<ValueWrapper>,
 }
 
@@ -28,11 +28,6 @@ where
 {
     fn to_html(&self, mjenv: &minijinja::Environment<'_>) -> Result<String, minijinja::Error> {
         let mut rendered_fields = String::new();
-        let form_context = FormContext {
-            update_endpoint: self.update_endpoint.clone(),
-            headers: HashMap::new(),
-            extra: HashMap::new(),
-        };
 
         match &self.data {
             Some(value) => {
@@ -45,7 +40,7 @@ where
                                 mjenv,
                                 state_path.clone(),
                                 state_path.find_value(&value.0),
-                                &form_context,
+                                &self.form_ctx,
                             )?
                             .as_str(),
                     );
@@ -55,7 +50,7 @@ where
                 for field in self.schema.iter() {
                     rendered_fields.push_str(
                         field
-                            .to_html(mjenv, DataPath::from(field.get_name()), None, &form_context)?
+                            .to_html(mjenv, DataPath::from(field.get_name()), None, &self.form_ctx)?
                             .as_str(),
                     );
                 }
@@ -94,9 +89,10 @@ macro_rules! register_field_type_enum {
                 value: $crate::serde_json::Value,
                 old_value: $crate::serde_json::Value,
                 from_context: &FormContext,
+                runtime_ctx: Option<&dyn Any>
             ) {
                 match self {
-                    $(Self::$variant(v) => v.after_update(value, old_value, from_context)),*
+                    $(Self::$variant(v) => v.after_update(value, old_value, from_context, runtime_ctx)),*
                 }
             }
 
@@ -157,7 +153,7 @@ macro_rules! from_bytes {
     };
 }
 
-#[derive(serde::Serialize)]
+#[derive(Archive, Serialize, Deserialize, serde::Serialize, Debug, PartialEq, Eq)]
 pub struct FormContext {
     pub update_endpoint: String,
     pub headers: HashMap<String, String>,
@@ -216,7 +212,11 @@ mod test {
                 TextField::make("first_name".to_string()).into(),
                 TextField::make("last_name".to_string()).into(),
             ],
-            update_endpoint: "".to_string(),
+            form_ctx: FormContext {
+                update_endpoint: "".to_string(),
+                headers: HashMap::new(),
+                extra: HashMap::new(),
+            },
             uuid: "".to_string(),
             data: None,
         };
@@ -233,7 +233,11 @@ mod test {
                 TextField::make("first_name".to_string()).into(),
                 TextField::make("last_name".to_string()).into(),
             ],
-            update_endpoint: "".to_string(),
+            form_ctx: FormContext {
+                update_endpoint: "".to_string(),
+                headers: HashMap::new(),
+                extra: HashMap::new(),
+            },
             uuid: "".to_string(),
             data: Some(ValueWrapper(json!({
                 "first_name": "hehe",

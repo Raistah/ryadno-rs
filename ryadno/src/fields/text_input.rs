@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{any::Any, fmt::Display};
 
 use minijinja::context;
 use rkyv::{Archive};
@@ -77,6 +77,7 @@ impl Field for TextField {
         value: serde_json::Value,
         old_value: serde_json::Value,
         from_context: &FormContext,
+        runtime_ctx: Option<&dyn Any>
     ) {
         // TODO: update self based on new value, form context and other modifiers field have
     }
