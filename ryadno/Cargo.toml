@@ -8,11 +8,13 @@ name = "make"
 path = "src/bin/make.rs"
 
 [dependencies]
+ryadno_macro = { workspace = true }
 axum = { version = "0.8.8", features = ["form"] }
 axum_csrf = { version = "0.11.0", features = ["layer"] }
 clap = { version = "4.5.58", features = ["derive"] }
 futures = "0.3.31"
 include_dir = "0.7.4"
+linkme = "0.3.35"
 minijinja = { version = "2.15.1", features = ["builtins", "multi_template", "serde", "debug", "std_collections", "loader", "urlencode", "json", "loop_controls", "stacker", "speedups"] }
 rkyv = { version = "0.8.15", features = ["bytecheck"] }
 serde = { version = "1.0.228", features = ["derive"] }

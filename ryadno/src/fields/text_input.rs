@@ -1,31 +1,48 @@
 use std::{any::Any, fmt::Display};
 
+use linkme::distributed_slice;
 use minijinja::context;
-use rkyv::{Archive};
+use rkyv::Archive;
 use uuid::Uuid;
 
-use crate::{fields::{Field, prepare_value_for_datastar}, form::FormContext, structs::data_path::DataPath, utils::capitalize_first};
+use crate::{
+    fields::{BoolValue, Field, prepare_value_for_datastar},
+    form::FormContext,
+    structs::data_path::DataPath,
+    utils::capitalize_first,
+};
+
+#[distributed_slice]
+pub static RYADNO_FIELDS_TEXTFIELD_HIDDEN_CLOUSRES: [(&'static str, TextFieldHiddenClosure)];
+pub type TextFieldHiddenClosure = fn(
+    &TextField,
+    value: Option<&serde_json::Value>,
+    from_context: &FormContext,
+    runtime_ctx: Option<&dyn Any>,
+) -> bool;
 
 #[derive(Archive, rkyv::Serialize, rkyv::Deserialize, Debug, PartialEq, Eq)]
 pub struct TextField {
-	uuid: String,
+    uuid: String,
     name: String,
     label: String,
     live: bool,
-    hidden: bool,
+    hidden: BoolValue,
+    is_hidden: bool,
     input_type: TextFieldType,
 }
 
 impl TextField {
-	pub fn make(name: String) -> Self {
+    pub fn make(name: String) -> Self {
         let label = capitalize_first(name.as_str());
 
         Self {
-       		uuid: Uuid::new_v4().to_string(),
+            uuid: Uuid::new_v4().to_string(),
             name,
             label,
             live: false,
-            hidden: false,
+            hidden: BoolValue::Static(false),
+            is_hidden: false,
             input_type: TextFieldType::Text,
         }
     }
@@ -35,9 +52,29 @@ impl TextField {
         self
     }
 
-    pub fn hidden(mut self, hidden: bool) -> Self {
+    pub fn hidden(mut self, hidden: BoolValue) -> Self {
         self.hidden = hidden;
         self
+    }
+
+    pub fn is_hidden(
+        &mut self,
+        value: Option<&serde_json::Value>,
+        from_context: &FormContext,
+        runtime_ctx: Option<&dyn Any>,
+    ) -> bool {
+        match &self.hidden {
+            BoolValue::Static(v) => v.clone(),
+            BoolValue::Closure(handler) => {
+                match RYADNO_FIELDS_TEXTFIELD_HIDDEN_CLOUSRES
+                    .iter()
+                    .find(|closure| closure.0 == handler.as_str())
+                {
+                    Some(closure) => (closure.1)(self, value, from_context, runtime_ctx),
+                    None => false,
+                }
+            }
+        }
     }
 
     pub fn text(mut self) -> Self {
@@ -72,12 +109,21 @@ impl TextField {
 }
 
 impl Field for TextField {
+    fn initial_hydration(
+        &mut self,
+        value: Option<&serde_json::Value>,
+        form_context: &FormContext,
+        runtime_ctx: Option<&dyn Any>,
+    ) {
+        self.is_hidden = self.is_hidden(value, form_context, runtime_ctx);
+    }
+
     fn after_update(
         &mut self,
         value: serde_json::Value,
         old_value: serde_json::Value,
         from_context: &FormContext,
-        runtime_ctx: Option<&dyn Any>
+        runtime_ctx: Option<&dyn Any>,
     ) {
         // TODO: update self based on new value, form context and other modifiers field have
     }
@@ -91,17 +137,17 @@ impl Field for TextField {
     ) -> Result<String, minijinja::Error> {
         let value = match value {
             None => "null".to_string(),
-            Some(v) => prepare_value_for_datastar(&v)
+            Some(v) => prepare_value_for_datastar(&v),
         };
 
         mjenv
             .get_template("ryadno/fields/text-input.jinja")?
             .render(context! {
-            	uuid => self.uuid,
+                uuid => self.uuid,
                 label => self.label,
                 name => self.name,
                 state_path => state_path.to_string(),
-                hidden => self.hidden,
+                hidden => self.is_hidden,
                 input_type => self.input_type.to_string(),
                 value => value,
                 form_context => from_context
@@ -121,7 +167,7 @@ impl Field for TextField {
     }
 
     fn get_uuid(&self) -> &str {
-    	&self.uuid
+        &self.uuid
     }
 }
 

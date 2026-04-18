@@ -3,18 +3,33 @@ pub mod text_input;
 
 use std::{any::Any, fmt::Debug};
 
+use linkme::distributed_slice;
 use minijinja::Environment;
 use rkyv::Archive;
 use serde_json::Value;
 
-use crate::{fields::text_input::TextField, form::FormContext, structs::data_path::DataPath};
+use crate::{
+    fields::text_input::{RYADNO_FIELDS_TEXTFIELD_HIDDEN_CLOUSRES, TextField},
+    form::FormContext,
+    structs::data_path::DataPath,
+};
 
 pub trait Field: Archive + Debug + Eq + PartialEq {
+    /// Lifecycle method.
+    fn initial_hydration(
+        &mut self,
+        value: Option<&serde_json::Value>,
+        form_context: &FormContext,
+        runtime_ctx: Option<&dyn Any>,
+    );
+
+    /// Lifecycle method.
+    /// Form calls this method after any change if this field live property set to **true**
     fn after_update(
         &mut self,
         value: Value,
         old_value: Value,
-        from_context: &FormContext,
+        form_context: &FormContext,
         runtime_ctx: Option<&dyn Any>,
     );
     fn to_html(
@@ -22,7 +37,7 @@ pub trait Field: Archive + Debug + Eq + PartialEq {
         mjenv: &Environment<'_>,
         state_path: DataPath,
         value: Option<&Value>,
-        from_context: &FormContext,
+        form_context: &FormContext,
     ) -> Result<String, minijinja::Error>;
     fn validate(&self, value: Value) -> Result<(), Vec<(String, String)>>;
     fn get_name(&self) -> &str;
@@ -62,15 +77,27 @@ macro_rules! register_field_type_enum {
         )*
 
         impl Field for $enum_name {
+
+	        fn initial_hydration(
+	            &mut self,
+	            value: Option<&$crate::serde_json::Value>,
+	            form_context: &FormContext,
+	            runtime_ctx: Option<&dyn Any>
+	        ) {
+	            match self {
+	                $(Self::$variant(v) => v.initial_hydration(value, form_context, runtime_ctx)),*
+	            }
+	        }
+
             fn after_update(
                 &mut self,
                 value: $crate::serde_json::Value,
                 old_value: $crate::serde_json::Value,
-                from_context: &FormContext,
+                form_context: &FormContext,
                 runtime_ctx: Option<&dyn Any>
             ) {
                 match self {
-                    $(Self::$variant(v) => v.after_update(value, old_value, from_context, runtime_ctx)),*
+                    $(Self::$variant(v) => v.after_update(value, old_value, form_context, runtime_ctx)),*
                 }
             }
 
@@ -79,10 +106,10 @@ macro_rules! register_field_type_enum {
                 mjenv: &$crate::minijinja::Environment<'_>,
                 state_path: DataPath,
                 value: Option<&$crate::serde_json::Value>,
-                from_context: &FormContext,
+                form_context: &FormContext,
             ) -> Result<String, $crate::minijinja::Error> {
                 match self {
-                    $(Self::$variant(v) => v.to_html(mjenv, state_path, value, from_context)),*
+                    $(Self::$variant(v) => v.to_html(mjenv, state_path, value, form_context)),*
                 }
             }
 
@@ -111,6 +138,12 @@ macro_rules! register_field_type_enum {
             }
         }
     };
+}
+
+#[derive(Archive, rkyv::Serialize, rkyv::Deserialize, Debug, PartialEq, Eq)]
+pub enum BoolValue {
+    Static(bool),
+    Closure(String),
 }
 
 register_field_type_enum! {

@@ -23,20 +23,23 @@ impl<T> Form<T>
 where
     T: Field + Archive + Debug + Eq + PartialEq,
 {
-    fn to_html(&self, mjenv: &minijinja::Environment<'_>) -> Result<String, minijinja::Error> {
+    fn to_html(&mut self, mjenv: &minijinja::Environment<'_>) -> Result<String, minijinja::Error> {
         let mut rendered_fields = String::new();
 
         match &self.data {
             Some(value) => {
-                for field in self.schema.iter() {
+                for field in self.schema.iter_mut() {
                     let state_path = DataPath::from(field.get_name());
+                    let value = state_path.find_value(&value.0);
 
+                   	field.initial_hydration(value, &self.form_ctx, None);
+                    println!("{:?}", &field);
                     rendered_fields.push_str(
                         field
                             .to_html(
                                 mjenv,
                                 state_path.clone(),
-                                state_path.find_value(&value.0),
+                                value,
                                 &self.form_ctx,
                             )?
                             .as_str(),
@@ -44,7 +47,8 @@ where
                 }
             }
             None => {
-                for field in self.schema.iter() {
+                for field in self.schema.iter_mut() {
+                    field.initial_hydration(None, &self.form_ctx, None);
                     rendered_fields.push_str(
                         field
                             .to_html(
@@ -124,10 +128,14 @@ impl<D: Fallible + ?Sized> Deserialize<ValueWrapper, D> for ArchivedString {
 
 #[cfg(test)]
 mod test {
+    use linkme::distributed_slice;
     use minijinja::{Environment, path_loader};
     use serde_json::json;
 
-    use crate::fields::{FieldTypes, text_input::TextField};
+    use crate::fields::{
+        BoolValue, FieldTypes,
+        text_input::{RYADNO_FIELDS_TEXTFIELD_HIDDEN_CLOUSRES, TextField, TextFieldHiddenClosure},
+    };
 
     use super::*;
 
@@ -154,7 +162,7 @@ mod test {
 
     #[test]
     fn test_form_to_html() {
-        let form: Form<FieldTypes> = Form {
+        let mut form: Form<FieldTypes> = Form {
             schema: vec![
                 TextField::make("first_name".to_string()).into(),
                 TextField::make("last_name".to_string()).into(),
@@ -182,5 +190,55 @@ mod test {
         assert!(html.contains("path: 'first_name'"));
         assert!(html.contains("value: 'hoho'"));
         assert!(html.contains("path: 'last_name'"));
+    }
+
+    #[distributed_slice(RYADNO_FIELDS_TEXTFIELD_HIDDEN_CLOUSRES)]
+    pub static TEST_CLOSURE: (
+        &'static str,
+        TextFieldHiddenClosure,
+    ) = (
+        "hidden_closure",
+        |_, _, _, _| {
+        	true
+        },
+    );
+
+    #[test]
+    fn test_form_to_html_dynamic() {
+        let mut form: Form<FieldTypes> = Form {
+            schema: vec![
+                TextField::make("test1".to_string())
+                    .hidden(BoolValue::Static(true))
+                    .into(),
+                TextField::make("test2".to_string())
+                    .hidden(BoolValue::Closure("this_closure_not_exists".into()))
+                    .into(),
+                TextField::make("test3".to_string())
+                    .hidden(BoolValue::Closure("hidden_closure".into()))
+                    .into(),
+            ],
+            form_ctx: FormContext {
+                update_endpoint: "".to_string(),
+                headers: HashMap::new(),
+                extra: HashMap::new(),
+            },
+            uuid: "".to_string(),
+            data: Some(ValueWrapper(json!({
+                "test1": "_",
+                "test2": "_",
+                "test3": "test"
+            }))),
+        };
+
+        let mut env = Environment::new();
+        env.set_loader(move |name| {
+            let real_name = name.replace("ryadno/", "");
+            path_loader("./src/templates")(real_name.as_str())
+        });
+
+        let html = form.to_html(&env).unwrap();
+        assert!(!html.contains(r#"<span class="block">Test1</span>"#));
+        assert!(html.contains(r#"<span class="block">Test2</span>"#));
+        assert!(!html.contains(r#"<span class="block">Test3</span>"#));
     }
 }

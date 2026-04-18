@@ -17,9 +17,10 @@ pub mod utils;
 pub mod form;
 
 // reexport
+pub use linkme;
+pub use minijinja;
 pub use rkyv;
 pub use serde_json;
-pub use minijinja;
 
 pub struct PanelBuilder {
     pub prefix: String,
@@ -36,7 +37,7 @@ impl PanelBuilder {
 
     pub fn build(self, env: Arc<Environment<'static>>) -> axum::Router {
         let mut router = axum::Router::new();
-        let mut state = PanelState { mjenv: env };
+        let state = PanelState { mjenv: env };
 
         if let Some(registration_page) = &self.registration_page {
             router = self.add_registration(router, registration_page.clone());
