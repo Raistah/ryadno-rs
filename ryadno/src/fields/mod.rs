@@ -1,37 +1,37 @@
+// Create sync and async version for methods to use with respective form type
 pub mod select;
 pub mod text_input;
 
 use std::{any::Any, fmt::Debug};
 
-use linkme::distributed_slice;
 use minijinja::Environment;
 use rkyv::Archive;
 use serde_json::Value;
 
-use crate::{
-    fields::text_input::{RYADNO_FIELDS_TEXTFIELD_HIDDEN_CLOUSRES, TextField},
-    form::FormContext,
-    structs::data_path::DataPath,
-};
+use crate::{fields::text_input::TextField, form::FormContext, structs::data_path::DataPath};
 
 pub trait Field: Archive + Debug + Eq + PartialEq {
     /// Lifecycle method.
-    fn initial_hydration(
+    /// Form calls this method before generate html for the first time
+    async fn initial_hydration<'a>(
         &mut self,
         value: Option<&serde_json::Value>,
         form_context: &FormContext,
         runtime_ctx: Option<&dyn Any>,
+        get: &dyn Fn(DataPath) -> Option<&'a serde_json::Value>,
+        set: &dyn FnMut(DataPath, Value),
     );
 
     /// Lifecycle method.
     /// Form calls this method after any change if this field live property set to **true**
-    fn after_update(
+    async fn after_update(
         &mut self,
         value: Value,
         old_value: Value,
         form_context: &FormContext,
         runtime_ctx: Option<&dyn Any>,
     );
+
     fn to_html(
         &self,
         mjenv: &Environment<'_>,
@@ -78,18 +78,20 @@ macro_rules! register_field_type_enum {
 
         impl Field for $enum_name {
 
-	        fn initial_hydration(
+	        async fn initial_hydration<'a>(
 	            &mut self,
 	            value: Option<&$crate::serde_json::Value>,
 	            form_context: &FormContext,
-	            runtime_ctx: Option<&dyn Any>
+	            runtime_ctx: Option<&dyn Any>,
+				get: &dyn Fn(DataPath) -> Option<&'a serde_json::Value>,
+        		set: &dyn FnMut(DataPath, serde_json::Value),
 	        ) {
 	            match self {
-	                $(Self::$variant(v) => v.initial_hydration(value, form_context, runtime_ctx)),*
-	            }
+	                $(Self::$variant(v) => v.initial_hydration(value, form_context, runtime_ctx, get, set)),*
+	            }.await
 	        }
 
-            fn after_update(
+            async fn after_update(
                 &mut self,
                 value: $crate::serde_json::Value,
                 old_value: $crate::serde_json::Value,
@@ -98,7 +100,7 @@ macro_rules! register_field_type_enum {
             ) {
                 match self {
                     $(Self::$variant(v) => v.after_update(value, old_value, form_context, runtime_ctx)),*
-                }
+                }.await
             }
 
             fn to_html(

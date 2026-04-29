@@ -79,19 +79,3 @@ pub fn add_closures_registry(input: TokenStream) -> proc_macro::TokenStream {
     let data = parse_macro_input!(input as AddClosuresRegistryArgs);
     quote! {#data}.into()
 }
-
-// #[distributed_slice]
-// pub static RYADNO_FIELDS_TEXTINPUT_TEXTFIELD_HIDDEN_CLOUSRES: [(
-//     &'static str,
-//     Hehe,
-// )];
-
-// pub static HANDLER_NAME: &'static str = "uuid";
-// #[distributed_slice(RYADNO_FIELDS_TEXTINPUT_TEXTFIELD_HIDDEN_CLOUSRES)]
-// pub static TEST_CLOSURE: (
-//     &'static str,
-//     Hehe,
-// ) = (
-//     "uuid",
-//     |field: &TextField, form_context: &FormContext, runtime_ctx: Option<&dyn Any>| true,
-// );

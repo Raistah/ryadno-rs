@@ -14,11 +14,13 @@ use crate::{
 
 #[distributed_slice]
 pub static RYADNO_FIELDS_TEXTFIELD_HIDDEN_CLOUSRES: [(&'static str, TextFieldHiddenClosure)];
-pub type TextFieldHiddenClosure = fn(
+pub type TextFieldHiddenClosure = for<'a> fn(
     &TextField,
     value: Option<&serde_json::Value>,
     from_context: &FormContext,
     runtime_ctx: Option<&dyn Any>,
+    get: &dyn Fn(DataPath) -> Option<&'a serde_json::Value>,
+    set: &dyn FnMut(DataPath, serde_json::Value),
 ) -> bool;
 
 #[derive(Archive, rkyv::Serialize, rkyv::Deserialize, Debug, PartialEq, Eq)]
@@ -57,11 +59,13 @@ impl TextField {
         self
     }
 
-    pub fn is_hidden(
+    pub fn is_hidden<'a>(
         &mut self,
         value: Option<&serde_json::Value>,
         from_context: &FormContext,
         runtime_ctx: Option<&dyn Any>,
+        get: &dyn Fn(DataPath) -> Option<&'a serde_json::Value>,
+        set: &dyn FnMut(DataPath, serde_json::Value),
     ) -> bool {
         match &self.hidden {
             BoolValue::Static(v) => v.clone(),
@@ -70,7 +74,7 @@ impl TextField {
                     .iter()
                     .find(|closure| closure.0 == handler.as_str())
                 {
-                    Some(closure) => (closure.1)(self, value, from_context, runtime_ctx),
+                    Some(closure) => (closure.1)(self, value, from_context, runtime_ctx, get, set),
                     None => false,
                 }
             }
@@ -109,16 +113,18 @@ impl TextField {
 }
 
 impl Field for TextField {
-    fn initial_hydration(
+    async fn initial_hydration<'a>(
         &mut self,
         value: Option<&serde_json::Value>,
         form_context: &FormContext,
         runtime_ctx: Option<&dyn Any>,
+        get: &dyn Fn(DataPath) -> Option<&'a serde_json::Value>,
+        set: &dyn FnMut(DataPath, serde_json::Value),
     ) {
-        self.is_hidden = self.is_hidden(value, form_context, runtime_ctx);
+        self.is_hidden = self.is_hidden(value, form_context, runtime_ctx, get, set);
     }
 
-    fn after_update(
+    async fn after_update(
         &mut self,
         value: serde_json::Value,
         old_value: serde_json::Value,

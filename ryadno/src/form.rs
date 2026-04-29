@@ -1,4 +1,5 @@
-use std::{collections::HashMap, fmt::Debug};
+// TODO: fist of all rework everything async way, then create sync version if required
+use std::{any::Any, collections::HashMap, fmt::Debug};
 
 use minijinja::context;
 use rkyv::{
@@ -23,32 +24,48 @@ impl<T> Form<T>
 where
     T: Field + Archive + Debug + Eq + PartialEq,
 {
-    fn to_html(&mut self, mjenv: &minijinja::Environment<'_>) -> Result<String, minijinja::Error> {
-        let mut rendered_fields = String::new();
+    async fn to_html<'a, C: Any>(
+        &mut self,
+        mjenv: &minijinja::Environment<'_>,
+        runtime_ctx: impl Into<Option<&'a C>>,
+    ) -> Result<String, minijinja::Error> {
+        let ctx_opt = runtime_ctx.into();
+        let ctx: Option<&dyn Any> = ctx_opt.map(|c| c as &dyn Any);
 
+        let mut rendered_fields = String::new();
         match &self.data {
             Some(value) => {
+                // TODO: write tests for getter
+                let getter =
+                    |data_path: DataPath| -> Option<&Value> { data_path.find_value(&value.0) };
+
+                // TODO: write logic for setter, add tests
+                // what to do if value is not exists yet, should add it recursively?
+                let setter = |data_path: DataPath, value: Value| {};
+
                 for field in self.schema.iter_mut() {
                     let state_path = DataPath::from(field.get_name());
-                    let value = state_path.find_value(&value.0);
+                    let field_value = state_path.find_value(&value.0);
 
-                   	field.initial_hydration(value, &self.form_ctx, None);
-                    println!("{:?}", &field);
+                    field
+                        .initial_hydration(field_value, &self.form_ctx, ctx, &getter, &setter)
+                        .await;
                     rendered_fields.push_str(
                         field
-                            .to_html(
-                                mjenv,
-                                state_path.clone(),
-                                value,
-                                &self.form_ctx,
-                            )?
+                            .to_html(mjenv, state_path.clone(), field_value, &self.form_ctx)?
                             .as_str(),
                     );
                 }
             }
             None => {
+                // if no data present, then no need to have actual accessors
+                let getter = |_: DataPath| -> Option<&Value> { None };
+                let setter = |_: DataPath, _: Value| {};
+
                 for field in self.schema.iter_mut() {
-                    field.initial_hydration(None, &self.form_ctx, None);
+                    field
+                        .initial_hydration(None, &self.form_ctx, ctx, &getter, &setter)
+                        .await;
                     rendered_fields.push_str(
                         field
                             .to_html(
@@ -66,6 +83,13 @@ where
         mjenv.get_template("ryadno/form.jinja")?.render(context! {
             html => rendered_fields
         })
+    }
+
+    async fn to_html_no_ctx(
+        &mut self,
+        mjenv: &minijinja::Environment<'_>,
+    ) -> Result<String, minijinja::Error> {
+        self.to_html::<()>(mjenv, None).await
     }
 }
 
@@ -139,8 +163,8 @@ mod test {
 
     use super::*;
 
-    #[test]
-    fn test_rkyv_with_generic() {
+    #[tokio::test]
+    async fn test_rkyv_with_generic() {
         let form = Form {
             schema: vec![
                 TextField::make("first_name".to_string()).into(),
@@ -160,8 +184,8 @@ mod test {
         assert_eq!(form, restored_form);
     }
 
-    #[test]
-    fn test_form_to_html() {
+    #[tokio::test]
+    async fn test_form_to_html() {
         let mut form: Form<FieldTypes> = Form {
             schema: vec![
                 TextField::make("first_name".to_string()).into(),
@@ -185,7 +209,7 @@ mod test {
             path_loader("./src/templates")(real_name.as_str())
         });
 
-        let html = form.to_html(&env).unwrap();
+        let html = form.to_html_no_ctx(&env).await.unwrap();
         assert!(html.contains("value: 'hehe'"));
         assert!(html.contains("path: 'first_name'"));
         assert!(html.contains("value: 'hoho'"));
@@ -193,28 +217,48 @@ mod test {
     }
 
     #[distributed_slice(RYADNO_FIELDS_TEXTFIELD_HIDDEN_CLOUSRES)]
-    pub static TEST_CLOSURE: (
-        &'static str,
-        TextFieldHiddenClosure,
-    ) = (
-        "hidden_closure",
-        |_, _, _, _| {
-        	true
+    pub static GET_TEST2_USING_RUNTIME_CTX_CLOSURE: (&'static str, TextFieldHiddenClosure) = (
+        "GET_TEST2_USING_RUNTIME_CTX_CLOSURE",
+        |_, _, _, ctx, _, _| {
+            if let Some(any) = ctx
+                && let Some(ctx) = any.downcast_ref::<HashMap<String, bool>>()
+            {
+                return ctx.get(&"test2".to_string()).unwrap_or(&false).clone();
+            }
+            false
         },
     );
 
-    #[test]
-    fn test_form_to_html_dynamic() {
+    #[distributed_slice(RYADNO_FIELDS_TEXTFIELD_HIDDEN_CLOUSRES)]
+    pub static GET_TEST3_USING_GETTER_CLOSURE: (&'static str, TextFieldHiddenClosure) =
+        ("GET_TEST3_USING_GETTER_CLOSURE", |_, _, _, _, get, _| {
+            if Some(&Value::String("test3 value".to_string())) == get(DataPath::from("test3")) {
+                return true;
+            }
+            false
+        });
+
+    #[tokio::test]
+    async fn test_form_to_html_dynamic() {
+        let mut ctx: HashMap<String, bool> = HashMap::new();
+        ctx.insert("test2".to_string(), true);
+
         let mut form: Form<FieldTypes> = Form {
             schema: vec![
                 TextField::make("test1".to_string())
                     .hidden(BoolValue::Static(true))
                     .into(),
+                // Default value is set when closure not found
                 TextField::make("test2".to_string())
                     .hidden(BoolValue::Closure("this_closure_not_exists".into()))
                     .into(),
                 TextField::make("test3".to_string())
-                    .hidden(BoolValue::Closure("hidden_closure".into()))
+                    .hidden(BoolValue::Closure(
+                        GET_TEST2_USING_RUNTIME_CTX_CLOSURE.0.into(),
+                    ))
+                    .into(),
+                TextField::make("test4".to_string())
+                    .hidden(BoolValue::Closure(GET_TEST3_USING_GETTER_CLOSURE.0.into()))
                     .into(),
             ],
             form_ctx: FormContext {
@@ -225,8 +269,9 @@ mod test {
             uuid: "".to_string(),
             data: Some(ValueWrapper(json!({
                 "test1": "_",
-                "test2": "_",
-                "test3": "test"
+                "test2": "test2 value",
+                "test3": "test3 value",
+                "test4": "_"
             }))),
         };
 
@@ -236,9 +281,10 @@ mod test {
             path_loader("./src/templates")(real_name.as_str())
         });
 
-        let html = form.to_html(&env).unwrap();
+        let html = form.to_html(&env, &ctx).await.unwrap();
         assert!(!html.contains(r#"<span class="block">Test1</span>"#));
         assert!(html.contains(r#"<span class="block">Test2</span>"#));
         assert!(!html.contains(r#"<span class="block">Test3</span>"#));
+        assert!(!html.contains(r#"<span class="block">Test4</span>"#));
     }
 }
