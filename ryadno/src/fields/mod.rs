@@ -2,7 +2,7 @@
 pub mod select;
 pub mod text_input;
 
-use std::{any::Any, fmt::Debug};
+use std::{any::Any, fmt::Debug, sync::Arc};
 
 use minijinja::Environment;
 use rkyv::Archive;
@@ -17,8 +17,8 @@ pub trait Field: Archive + Debug + Eq + PartialEq {
         &mut self,
         value: Option<&serde_json::Value>,
         form_context: &FormContext,
-        runtime_ctx: Option<&dyn Any>,
-        get: &dyn Fn(DataPath) -> Option<&'a serde_json::Value>,
+        runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
+        get: Arc<dyn Fn(DataPath) -> Option<serde_json::Value> + Sync + Send + 'a>,
         set: &dyn FnMut(DataPath, Value),
     );
 
@@ -82,8 +82,8 @@ macro_rules! register_field_type_enum {
 	            &mut self,
 	            value: Option<&$crate::serde_json::Value>,
 	            form_context: &FormContext,
-	            runtime_ctx: Option<&dyn Any>,
-				get: &dyn Fn(DataPath) -> Option<&'a serde_json::Value>,
+	            runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
+				get: Arc<dyn Fn(DataPath) -> Option<serde_json::Value> + Sync + Send + 'a>,
         		set: &dyn FnMut(DataPath, serde_json::Value),
 	        ) {
 	            match self {
@@ -152,4 +152,11 @@ register_field_type_enum! {
     FieldTypes {
         Text(TextField),
     }
+}
+
+#[macro_export]
+macro_rules! async_closure {
+    (($($arg:pat),*) $body:block) => {
+        |$($arg),*| { Box::pin(async move $body) }
+    };
 }

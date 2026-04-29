@@ -1,4 +1,4 @@
-use std::{any::Any, fmt::Display};
+use std::{any::Any, fmt::Display, pin::Pin, sync::Arc};
 
 use linkme::distributed_slice;
 use minijinja::context;
@@ -18,10 +18,10 @@ pub type TextFieldHiddenClosure = for<'a> fn(
     &TextField,
     value: Option<&serde_json::Value>,
     from_context: &FormContext,
-    runtime_ctx: Option<&dyn Any>,
-    get: &dyn Fn(DataPath) -> Option<&'a serde_json::Value>,
+    runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
+    get: Arc<dyn Fn(DataPath) -> Option<serde_json::Value> + Sync + Send + 'a>,
     set: &dyn FnMut(DataPath, serde_json::Value),
-) -> bool;
+) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>>;
 
 #[derive(Archive, rkyv::Serialize, rkyv::Deserialize, Debug, PartialEq, Eq)]
 pub struct TextField {
@@ -59,12 +59,12 @@ impl TextField {
         self
     }
 
-    pub fn is_hidden<'a>(
+    pub async fn is_hidden<'a>(
         &mut self,
         value: Option<&serde_json::Value>,
         from_context: &FormContext,
-        runtime_ctx: Option<&dyn Any>,
-        get: &dyn Fn(DataPath) -> Option<&'a serde_json::Value>,
+        runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
+        get: Arc<dyn Fn(DataPath) -> Option<serde_json::Value> + Sync + Send + 'a>,
         set: &dyn FnMut(DataPath, serde_json::Value),
     ) -> bool {
         match &self.hidden {
@@ -74,7 +74,7 @@ impl TextField {
                     .iter()
                     .find(|closure| closure.0 == handler.as_str())
                 {
-                    Some(closure) => (closure.1)(self, value, from_context, runtime_ctx, get, set),
+                    Some(closure) => (closure.1)(self, value, from_context, runtime_ctx, get, set).await,
                     None => false,
                 }
             }
@@ -117,11 +117,11 @@ impl Field for TextField {
         &mut self,
         value: Option<&serde_json::Value>,
         form_context: &FormContext,
-        runtime_ctx: Option<&dyn Any>,
-        get: &dyn Fn(DataPath) -> Option<&'a serde_json::Value>,
+        runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
+        get: Arc<dyn Fn(DataPath) -> Option<serde_json::Value> + Sync + Send + 'a>,
         set: &dyn FnMut(DataPath, serde_json::Value),
     ) {
-        self.is_hidden = self.is_hidden(value, form_context, runtime_ctx, get, set);
+        self.is_hidden = self.is_hidden(value, form_context, runtime_ctx, get, set).await;
     }
 
     async fn after_update(

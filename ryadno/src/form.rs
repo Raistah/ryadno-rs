@@ -1,5 +1,5 @@
 // TODO: fist of all rework everything async way, then create sync version if required
-use std::{any::Any, collections::HashMap, fmt::Debug};
+use std::{any::Any, collections::HashMap, fmt::Debug, sync::Arc};
 
 use minijinja::context;
 use rkyv::{
@@ -10,6 +10,7 @@ use rkyv::{
 };
 use serde_json::Value;
 
+use crate::async_closure;
 use crate::{fields::Field, structs::data_path::DataPath};
 
 #[derive(Archive, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -24,20 +25,22 @@ impl<T> Form<T>
 where
     T: Field + Archive + Debug + Eq + PartialEq,
 {
-    async fn to_html<'a, C: Any>(
+    async fn to_html<'a, C: Any + Sync + Send>(
         &mut self,
         mjenv: &minijinja::Environment<'_>,
-        runtime_ctx: impl Into<Option<&'a C>>,
+        runtime_ctx: impl Into<Option<Arc<C>>>,
     ) -> Result<String, minijinja::Error> {
         let ctx_opt = runtime_ctx.into();
-        let ctx: Option<&dyn Any> = ctx_opt.map(|c| c as &dyn Any);
+        let ctx: Option<Arc<dyn Any + Send + Sync>> =
+            ctx_opt.map(|arc_c| arc_c as Arc<dyn Any + Send + Sync>);
 
         let mut rendered_fields = String::new();
         match &self.data {
             Some(value) => {
-                // TODO: write tests for getter
-                let getter =
-                    |data_path: DataPath| -> Option<&Value> { data_path.find_value(&value.0) };
+                let arc_value = Arc::new(value.0.clone());
+                let getter = Arc::new(|data_path: DataPath| -> Option<Value> {
+                    data_path.find_value(arc_value.as_ref()).map(|v| v.clone())
+                });
 
                 // TODO: write logic for setter, add tests
                 // what to do if value is not exists yet, should add it recursively?
@@ -48,7 +51,13 @@ where
                     let field_value = state_path.find_value(&value.0);
 
                     field
-                        .initial_hydration(field_value, &self.form_ctx, ctx, &getter, &setter)
+                        .initial_hydration(
+                            field_value,
+                            &self.form_ctx,
+                            ctx.clone(),
+                            getter.clone(),
+                            &setter,
+                        )
                         .await;
                     rendered_fields.push_str(
                         field
@@ -59,12 +68,21 @@ where
             }
             None => {
                 // if no data present, then no need to have actual accessors
-                let getter = |_: DataPath| -> Option<&Value> { None };
+                let getter = Arc::new(|data_path: DataPath| -> Option<Value> {
+                    // data_path.find_value(V).map(|v| v.clone())
+                    Some(Value::Null)
+                });
                 let setter = |_: DataPath, _: Value| {};
 
                 for field in self.schema.iter_mut() {
                     field
-                        .initial_hydration(None, &self.form_ctx, ctx, &getter, &setter)
+                        .initial_hydration(
+                            None,
+                            &self.form_ctx,
+                            ctx.clone(),
+                            getter.clone(),
+                            &setter,
+                        )
                         .await;
                     rendered_fields.push_str(
                         field
@@ -219,29 +237,32 @@ mod test {
     #[distributed_slice(RYADNO_FIELDS_TEXTFIELD_HIDDEN_CLOUSRES)]
     pub static GET_TEST2_USING_RUNTIME_CTX_CLOSURE: (&'static str, TextFieldHiddenClosure) = (
         "GET_TEST2_USING_RUNTIME_CTX_CLOSURE",
-        |_, _, _, ctx, _, _| {
+        async_closure!((_, _, _, ctx, _, _) {
             if let Some(any) = ctx
                 && let Some(ctx) = any.downcast_ref::<HashMap<String, bool>>()
             {
                 return ctx.get(&"test2".to_string()).unwrap_or(&false).clone();
             }
             false
-        },
+        }),
     );
 
     #[distributed_slice(RYADNO_FIELDS_TEXTFIELD_HIDDEN_CLOUSRES)]
-    pub static GET_TEST3_USING_GETTER_CLOSURE: (&'static str, TextFieldHiddenClosure) =
-        ("GET_TEST3_USING_GETTER_CLOSURE", |_, _, _, _, get, _| {
-            if Some(&Value::String("test3 value".to_string())) == get(DataPath::from("test3")) {
+    pub static GET_TEST3_USING_GETTER_CLOSURE: (&'static str, TextFieldHiddenClosure) = (
+        "GET_TEST3_USING_GETTER_CLOSURE",
+        async_closure!((_, _, _, _, get, _) {
+            if Some(Value::String("test3 value".to_string())) == get(DataPath::from("test3")) {
                 return true;
             }
             false
-        });
+        }),
+    );
 
     #[tokio::test]
     async fn test_form_to_html_dynamic() {
         let mut ctx: HashMap<String, bool> = HashMap::new();
         ctx.insert("test2".to_string(), true);
+        let ctx = Arc::new(ctx);
 
         let mut form: Form<FieldTypes> = Form {
             schema: vec![
@@ -281,7 +302,7 @@ mod test {
             path_loader("./src/templates")(real_name.as_str())
         });
 
-        let html = form.to_html(&env, &ctx).await.unwrap();
+        let html = form.to_html(&env, ctx).await.unwrap();
         assert!(!html.contains(r#"<span class="block">Test1</span>"#));
         assert!(html.contains(r#"<span class="block">Test2</span>"#));
         assert!(!html.contains(r#"<span class="block">Test3</span>"#));
