@@ -1,5 +1,6 @@
 use std::{any::Any, fmt::Display, pin::Pin, sync::Arc};
 
+use futures::future::BoxFuture;
 use linkme::distributed_slice;
 use minijinja::context;
 use rkyv::Archive;
@@ -19,7 +20,7 @@ pub type TextFieldHiddenClosure = for<'a> fn(
     value: Option<&serde_json::Value>,
     from_context: &FormContext,
     runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
-    get: Arc<dyn Fn(DataPath) -> Option<serde_json::Value> + Sync + Send + 'a>,
+    get: Arc<dyn Fn(DataPath) -> BoxFuture<'a, Option<serde_json::Value>> + Sync + Send + 'a>,
     set: &dyn FnMut(DataPath, serde_json::Value),
 ) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>>;
 
@@ -64,7 +65,7 @@ impl TextField {
         value: Option<&serde_json::Value>,
         from_context: &FormContext,
         runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
-        get: Arc<dyn Fn(DataPath) -> Option<serde_json::Value> + Sync + Send + 'a>,
+        get: Arc<dyn Fn(DataPath) -> BoxFuture<'a, Option<serde_json::Value>> + Sync + Send + 'a>,
         set: &dyn FnMut(DataPath, serde_json::Value),
     ) -> bool {
         match &self.hidden {
@@ -118,7 +119,7 @@ impl Field for TextField {
         value: Option<&serde_json::Value>,
         form_context: &FormContext,
         runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
-        get: Arc<dyn Fn(DataPath) -> Option<serde_json::Value> + Sync + Send + 'a>,
+        get: Arc<dyn Fn(DataPath) -> BoxFuture<'a, Option<serde_json::Value>> + Sync + Send + 'a>,
         set: &dyn FnMut(DataPath, serde_json::Value),
     ) {
         self.is_hidden = self.is_hidden(value, form_context, runtime_ctx, get, set).await;

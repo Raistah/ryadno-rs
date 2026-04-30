@@ -4,6 +4,7 @@ pub mod text_input;
 
 use std::{any::Any, fmt::Debug, sync::Arc};
 
+use futures::future::BoxFuture;
 use minijinja::Environment;
 use rkyv::Archive;
 use serde_json::Value;
@@ -18,7 +19,7 @@ pub trait Field: Archive + Debug + Eq + PartialEq {
         value: Option<&serde_json::Value>,
         form_context: &FormContext,
         runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
-        get: Arc<dyn Fn(DataPath) -> Option<serde_json::Value> + Sync + Send + 'a>,
+        get: Arc<dyn Fn(DataPath) -> BoxFuture<'a, Option<serde_json::Value>> + Sync + Send + 'a>,
         set: &dyn FnMut(DataPath, Value),
     );
 
@@ -83,7 +84,7 @@ macro_rules! register_field_type_enum {
 	            value: Option<&$crate::serde_json::Value>,
 	            form_context: &FormContext,
 	            runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
-				get: Arc<dyn Fn(DataPath) -> Option<serde_json::Value> + Sync + Send + 'a>,
+				get: Arc<dyn Fn(DataPath) -> BoxFuture<'a, Option<serde_json::Value>> + Sync + Send + 'a>,
         		set: &dyn FnMut(DataPath, serde_json::Value),
 	        ) {
 	            match self {

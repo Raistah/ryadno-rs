@@ -1,6 +1,7 @@
 // TODO: fist of all rework everything async way, then create sync version if required
 use std::{any::Any, collections::HashMap, fmt::Debug, sync::Arc};
 
+use futures::{FutureExt, future::BoxFuture};
 use minijinja::context;
 use rkyv::{
     Archive, Deserialize, Serialize,
@@ -9,8 +10,8 @@ use rkyv::{
     string::{ArchivedString, StringResolver},
 };
 use serde_json::Value;
+use tokio::sync::Mutex;
 
-use crate::async_closure;
 use crate::{fields::Field, structs::data_path::DataPath};
 
 #[derive(Archive, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -35,24 +36,45 @@ where
             ctx_opt.map(|arc_c| arc_c as Arc<dyn Any + Send + Sync>);
 
         let mut rendered_fields = String::new();
-        match &self.data {
+        match &mut self.data {
             Some(value) => {
-                let arc_value = Arc::new(value.0.clone());
-                let getter = Arc::new(|data_path: DataPath| -> Option<Value> {
-                    data_path.find_value(arc_value.as_ref()).map(|v| v.clone())
+                let value_amx = Arc::new(Mutex::new(std::mem::take(&mut value.0)));
+                let value_amx_clone = value_amx.clone();
+                let getter = Arc::new(move |data_path: DataPath| -> BoxFuture<Option<Value>> {
+                    let lock_handle = Arc::clone(&value_amx_clone);
+
+                    async move {
+                        let lock = lock_handle.lock().await;
+                        data_path.find_value(&lock).map(|v| v.clone())
+                    }
+                    .boxed()
                 });
 
                 // TODO: write logic for setter, add tests
                 // what to do if value is not exists yet, should add it recursively?
                 let setter = |data_path: DataPath, value: Value| {};
+                let value_amx_clone = value_amx.clone();
+                let setter_test =
+                    Arc::new(move |data_path: DataPath| -> BoxFuture<Option<Value>> {
+                        let lock_handle = Arc::clone(&value_amx_clone);
+
+                        async move {
+                            let lock = lock_handle.lock().await;
+                            data_path.find_value(&lock).map(|v| v.clone())
+                        }
+                        .boxed()
+                    });
 
                 for field in self.schema.iter_mut() {
                     let state_path = DataPath::from(field.get_name());
-                    let field_value = state_path.find_value(&value.0);
+                    let field_value = {
+                    	let lock = value_amx.lock().await;
+                    	state_path.find_value(&lock).map(|v| v.clone())
+                    };
 
                     field
                         .initial_hydration(
-                            field_value,
+                            field_value.as_ref(),
                             &self.form_ctx,
                             ctx.clone(),
                             getter.clone(),
@@ -61,16 +83,15 @@ where
                         .await;
                     rendered_fields.push_str(
                         field
-                            .to_html(mjenv, state_path.clone(), field_value, &self.form_ctx)?
+                            .to_html(mjenv, state_path.clone(), field_value.as_ref(), &self.form_ctx)?
                             .as_str(),
                     );
                 }
             }
             None => {
                 // if no data present, then no need to have actual accessors
-                let getter = Arc::new(|data_path: DataPath| -> Option<Value> {
-                    // data_path.find_value(V).map(|v| v.clone())
-                    Some(Value::Null)
+                let getter = Arc::new(move |_: DataPath| -> BoxFuture<Option<Value>> {
+                    async move { None }.boxed()
                 });
                 let setter = |_: DataPath, _: Value| {};
 
@@ -170,6 +191,7 @@ impl<D: Fallible + ?Sized> Deserialize<ValueWrapper, D> for ArchivedString {
 
 #[cfg(test)]
 mod test {
+    use crate::async_closure;
     use linkme::distributed_slice;
     use minijinja::{Environment, path_loader};
     use serde_json::json;
@@ -251,7 +273,7 @@ mod test {
     pub static GET_TEST3_USING_GETTER_CLOSURE: (&'static str, TextFieldHiddenClosure) = (
         "GET_TEST3_USING_GETTER_CLOSURE",
         async_closure!((_, _, _, _, get, _) {
-            if Some(Value::String("test3 value".to_string())) == get(DataPath::from("test3")) {
+            if Some(Value::String("test3 value".to_string())) == get(DataPath::from("test3")).await {
                 return true;
             }
             false
