@@ -21,7 +21,7 @@ pub type TextFieldHiddenClosure = for<'a> fn(
     from_context: &FormContext,
     runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
     get: Arc<dyn Fn(DataPath) -> BoxFuture<'a, Option<serde_json::Value>> + Sync + Send + 'a>,
-    set: &dyn FnMut(DataPath, serde_json::Value),
+    set: Arc<dyn Fn(DataPath, serde_json::Value) -> BoxFuture<'a, Option<DataPath>> + Sync + Send + 'a>,
 ) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>>;
 
 #[derive(Archive, rkyv::Serialize, rkyv::Deserialize, Debug, PartialEq, Eq)]
@@ -66,7 +66,7 @@ impl TextField {
         from_context: &FormContext,
         runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
         get: Arc<dyn Fn(DataPath) -> BoxFuture<'a, Option<serde_json::Value>> + Sync + Send + 'a>,
-        set: &dyn FnMut(DataPath, serde_json::Value),
+        set: Arc<dyn Fn(DataPath, serde_json::Value) -> BoxFuture<'a, Option<DataPath>> + Sync + Send + 'a>,
     ) -> bool {
         match &self.hidden {
             BoolValue::Static(v) => v.clone(),
@@ -120,7 +120,7 @@ impl Field for TextField {
         form_context: &FormContext,
         runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
         get: Arc<dyn Fn(DataPath) -> BoxFuture<'a, Option<serde_json::Value>> + Sync + Send + 'a>,
-        set: &dyn FnMut(DataPath, serde_json::Value),
+        set: Arc<dyn Fn(DataPath, serde_json::Value) -> BoxFuture<'a, Option<DataPath>> + Sync + Send + 'a>,
     ) {
         self.is_hidden = self.is_hidden(value, form_context, runtime_ctx, get, set).await;
     }

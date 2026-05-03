@@ -1,5 +1,5 @@
 // TODO: fist of all rework everything async way, then create sync version if required
-use std::{any::Any, collections::HashMap, fmt::Debug, sync::Arc};
+use std::{any::Any, collections::HashMap, fmt::Debug, ops::DerefMut, sync::Arc};
 
 use futures::{FutureExt, future::BoxFuture};
 use minijinja::context;
@@ -12,7 +12,10 @@ use rkyv::{
 use serde_json::Value;
 use tokio::sync::Mutex;
 
-use crate::{fields::Field, structs::data_path::DataPath};
+use crate::{
+    fields::Field,
+    structs::data_path::{DataPath, ValueUpdateStrategy},
+};
 
 #[derive(Archive, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct Form<T: Field + Archive + Debug + Eq + PartialEq> {
@@ -52,24 +55,25 @@ where
 
                 // TODO: write logic for setter, add tests
                 // what to do if value is not exists yet, should add it recursively?
-                let setter = |data_path: DataPath, value: Value| {};
                 let value_amx_clone = value_amx.clone();
-                let setter_test =
-                    Arc::new(move |data_path: DataPath| -> BoxFuture<Option<Value>> {
+                let setter = Arc::new(
+                    move |data_path: DataPath, value: Value| -> BoxFuture<Option<DataPath>> {
                         let lock_handle = Arc::clone(&value_amx_clone);
 
                         async move {
-                            let lock = lock_handle.lock().await;
-                            data_path.find_value(&lock).map(|v| v.clone())
+                            let mut lock = lock_handle.lock().await;
+                            let data = lock.deref_mut();
+                            data_path.set_value(data, value, ValueUpdateStrategy::Flex)
                         }
                         .boxed()
-                    });
+                    },
+                );
 
                 for field in self.schema.iter_mut() {
                     let state_path = DataPath::from(field.get_name());
                     let field_value = {
-                    	let lock = value_amx.lock().await;
-                    	state_path.find_value(&lock).map(|v| v.clone())
+                        let lock = value_amx.lock().await;
+                        state_path.find_value(&lock).map(|v| v.clone())
                     };
 
                     field
@@ -78,12 +82,17 @@ where
                             &self.form_ctx,
                             ctx.clone(),
                             getter.clone(),
-                            &setter,
+                            setter.clone(),
                         )
                         .await;
                     rendered_fields.push_str(
                         field
-                            .to_html(mjenv, state_path.clone(), field_value.as_ref(), &self.form_ctx)?
+                            .to_html(
+                                mjenv,
+                                state_path.clone(),
+                                field_value.as_ref(),
+                                &self.form_ctx,
+                            )?
                             .as_str(),
                     );
                 }
@@ -93,7 +102,11 @@ where
                 let getter = Arc::new(move |_: DataPath| -> BoxFuture<Option<Value>> {
                     async move { None }.boxed()
                 });
-                let setter = |_: DataPath, _: Value| {};
+                let setter = Arc::new(
+                    move |_: DataPath, _: Value| -> BoxFuture<Option<DataPath>> {
+                        async move { None }.boxed()
+                    },
+                );
 
                 for field in self.schema.iter_mut() {
                     field
@@ -102,7 +115,7 @@ where
                             &self.form_ctx,
                             ctx.clone(),
                             getter.clone(),
-                            &setter,
+                            setter.clone(),
                         )
                         .await;
                     rendered_fields.push_str(

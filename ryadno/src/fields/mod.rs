@@ -20,7 +20,7 @@ pub trait Field: Archive + Debug + Eq + PartialEq {
         form_context: &FormContext,
         runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
         get: Arc<dyn Fn(DataPath) -> BoxFuture<'a, Option<serde_json::Value>> + Sync + Send + 'a>,
-        set: &dyn FnMut(DataPath, Value),
+        set: Arc<dyn Fn(DataPath, Value) -> BoxFuture<'a, Option<DataPath>> + Sync + Send + 'a>,
     );
 
     /// Lifecycle method.
@@ -85,7 +85,7 @@ macro_rules! register_field_type_enum {
 	            form_context: &FormContext,
 	            runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
 				get: Arc<dyn Fn(DataPath) -> BoxFuture<'a, Option<serde_json::Value>> + Sync + Send + 'a>,
-        		set: &dyn FnMut(DataPath, serde_json::Value),
+        		set: Arc<dyn Fn(DataPath, serde_json::Value) -> BoxFuture<'a, Option<DataPath>> + Sync + Send + 'a>,
 	        ) {
 	            match self {
 	                $(Self::$variant(v) => v.initial_hydration(value, form_context, runtime_ctx, get, set)),*
