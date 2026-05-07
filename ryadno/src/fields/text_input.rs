@@ -17,7 +17,7 @@ use crate::{
 pub static RYADNO_FIELDS_TEXTFIELD_HIDDEN_CLOUSRES: [(&'static str, TextFieldHiddenClosure)];
 pub type TextFieldHiddenClosure = for<'a> fn(
     &TextField,
-    value: Option<&serde_json::Value>,
+    data_path: DataPath,
     from_context: &FormContext,
     runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
     get: Arc<dyn Fn(DataPath) -> BoxFuture<'a, Option<serde_json::Value>> + Sync + Send + 'a>,
@@ -62,7 +62,7 @@ impl TextField {
 
     pub async fn is_hidden<'a>(
         &mut self,
-        value: Option<&serde_json::Value>,
+        data_path: DataPath,
         from_context: &FormContext,
         runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
         get: Arc<dyn Fn(DataPath) -> BoxFuture<'a, Option<serde_json::Value>> + Sync + Send + 'a>,
@@ -75,7 +75,7 @@ impl TextField {
                     .iter()
                     .find(|closure| closure.0 == handler.as_str())
                 {
-                    Some(closure) => (closure.1)(self, value, from_context, runtime_ctx, get, set).await,
+                    Some(closure) => (closure.1)(self, data_path, from_context, runtime_ctx, get, set).await,
                     None => false,
                 }
             }
@@ -116,13 +116,13 @@ impl TextField {
 impl Field for TextField {
     async fn initial_hydration<'a>(
         &mut self,
-        value: Option<&serde_json::Value>,
+        data_path: DataPath,
         form_context: &FormContext,
         runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
         get: Arc<dyn Fn(DataPath) -> BoxFuture<'a, Option<serde_json::Value>> + Sync + Send + 'a>,
         set: Arc<dyn Fn(DataPath, serde_json::Value) -> BoxFuture<'a, Option<DataPath>> + Sync + Send + 'a>,
     ) {
-        self.is_hidden = self.is_hidden(value, form_context, runtime_ctx, get, set).await;
+        self.is_hidden = self.is_hidden(data_path, form_context, runtime_ctx, get, set).await;
     }
 
     async fn after_update(

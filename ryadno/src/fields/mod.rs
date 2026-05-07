@@ -9,14 +9,14 @@ use minijinja::Environment;
 use rkyv::Archive;
 use serde_json::Value;
 
-use crate::{fields::text_input::TextField, form::FormContext, structs::data_path::DataPath};
+use crate::{fields::text_input::TextField, form::FormContext, structs::data_path::{self, DataPath}};
 
 pub trait Field: Archive + Debug + Eq + PartialEq {
     /// Lifecycle method.
     /// Form calls this method before generate html for the first time
     async fn initial_hydration<'a>(
         &mut self,
-        value: Option<&serde_json::Value>,
+        data_path: DataPath,
         form_context: &FormContext,
         runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
         get: Arc<dyn Fn(DataPath) -> BoxFuture<'a, Option<serde_json::Value>> + Sync + Send + 'a>,
@@ -81,14 +81,14 @@ macro_rules! register_field_type_enum {
 
 	        async fn initial_hydration<'a>(
 	            &mut self,
-	            value: Option<&$crate::serde_json::Value>,
+	            data_path: DataPath,
 	            form_context: &FormContext,
 	            runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
 				get: Arc<dyn Fn(DataPath) -> BoxFuture<'a, Option<serde_json::Value>> + Sync + Send + 'a>,
         		set: Arc<dyn Fn(DataPath, serde_json::Value) -> BoxFuture<'a, Option<DataPath>> + Sync + Send + 'a>,
 	        ) {
 	            match self {
-	                $(Self::$variant(v) => v.initial_hydration(value, form_context, runtime_ctx, get, set)),*
+	                $(Self::$variant(v) => v.initial_hydration(data_path, form_context, runtime_ctx, get, set)),*
 	            }.await
 	        }
 

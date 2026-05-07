@@ -13,6 +13,8 @@ use serde_json::Value;
 use tokio::sync::Mutex;
 
 use crate::{
+    value_getter,
+    value_setter,
     fields::Field,
     structs::data_path::{DataPath, ValueUpdateStrategy},
 };
@@ -43,48 +45,27 @@ where
             Some(value) => {
                 let value_amx = Arc::new(Mutex::new(std::mem::take(&mut value.0)));
                 let value_amx_clone = value_amx.clone();
-                let getter = Arc::new(move |data_path: DataPath| -> BoxFuture<Option<Value>> {
-                    let lock_handle = Arc::clone(&value_amx_clone);
+                let getter = value_getter!(&value_amx_clone);
 
-                    async move {
-                        let lock = lock_handle.lock().await;
-                        data_path.find_value(&lock).map(|v| v.clone())
-                    }
-                    .boxed()
-                });
-
-                // TODO: write logic for setter, add tests
-                // what to do if value is not exists yet, should add it recursively?
                 let value_amx_clone = value_amx.clone();
-                let setter = Arc::new(
-                    move |data_path: DataPath, value: Value| -> BoxFuture<Option<DataPath>> {
-                        let lock_handle = Arc::clone(&value_amx_clone);
-
-                        async move {
-                            let mut lock = lock_handle.lock().await;
-                            let data = lock.deref_mut();
-                            data_path.set_value(data, value, ValueUpdateStrategy::Flex)
-                        }
-                        .boxed()
-                    },
-                );
+                let setter = value_setter!(&value_amx_clone);
 
                 for field in self.schema.iter_mut() {
                     let state_path = DataPath::from(field.get_name());
-                    let field_value = {
-                        let lock = value_amx.lock().await;
-                        state_path.find_value(&lock).map(|v| v.clone())
-                    };
-
                     field
                         .initial_hydration(
-                            field_value.as_ref(),
+                            state_path.clone(),
                             &self.form_ctx,
                             ctx.clone(),
                             getter.clone(),
                             setter.clone(),
                         )
                         .await;
+
+                    let field_value = {
+                        let lock = value_amx.lock().await;
+                        state_path.find_value(&lock).map(|v| v.clone())
+                    };
                     rendered_fields.push_str(
                         field
                             .to_html(
@@ -96,28 +77,30 @@ where
                             .as_str(),
                     );
                 }
+
+                let mut lock = value_amx.lock().await;
+                value.0 = std::mem::take(&mut *lock);
             }
             None => {
-                // if no data present, then no need to have actual accessors
-                let getter = Arc::new(move |_: DataPath| -> BoxFuture<Option<Value>> {
-                    async move { None }.boxed()
-                });
-                let setter = Arc::new(
-                    move |_: DataPath, _: Value| -> BoxFuture<Option<DataPath>> {
-                        async move { None }.boxed()
-                    },
-                );
+                let value_amx = Arc::new(Mutex::new(Value::Null));
+                let value_amx_clone = value_amx.clone();
+                let getter = value_getter!(&value_amx_clone);
+
+                let value_amx_clone = value_amx.clone();
+                let setter = value_setter!(&value_amx_clone);
 
                 for field in self.schema.iter_mut() {
+                    let state_path = DataPath::from(field.get_name());
                     field
                         .initial_hydration(
-                            None,
+                            state_path,
                             &self.form_ctx,
                             ctx.clone(),
                             getter.clone(),
                             setter.clone(),
                         )
                         .await;
+
                     rendered_fields.push_str(
                         field
                             .to_html(
@@ -129,6 +112,9 @@ where
                             .as_str(),
                     );
                 }
+
+                let mut lock = value_amx.lock().await;
+                self.data = Some(ValueWrapper(std::mem::take(&mut *lock)));
             }
         }
 
@@ -145,12 +131,47 @@ where
     }
 }
 
+#[macro_export]
+macro_rules! value_getter {
+    ($value:expr) => {
+        Arc::new(move |data_path: DataPath| -> BoxFuture<Option<Value>> {
+            let lock_handle = Arc::clone(&$value);
+
+            async move {
+                let lock = lock_handle.lock().await;
+                data_path.find_value(&lock).map(|v| v.clone())
+            }
+            .boxed()
+        })
+    };
+}
+
+#[macro_export]
+macro_rules! value_setter {
+    ($value:expr) => {
+        Arc::new(
+            move |data_path: DataPath, value: Value| -> BoxFuture<Option<DataPath>> {
+                let lock_handle = Arc::clone(&$value);
+
+                async move {
+                    let mut lock = lock_handle.lock().await;
+                    let data = lock.deref_mut();
+                    data_path.set_value(data, value, ValueUpdateStrategy::Flex)
+                }
+                .boxed()
+            },
+        )
+    };
+}
+
+#[macro_export]
 macro_rules! to_bytes {
     ($from:expr) => {
         $crate::rkyv::to_bytes::<$crate::rkyv::rancor::Error>($from)
     };
 }
 
+#[macro_export]
 macro_rules! from_bytes {
     ($type:ty, $bytes:expr) => {
         $crate::rkyv::from_bytes::<$type, $crate::rkyv::rancor::Error>($bytes)
@@ -272,10 +293,11 @@ mod test {
     #[distributed_slice(RYADNO_FIELDS_TEXTFIELD_HIDDEN_CLOUSRES)]
     pub static GET_TEST2_USING_RUNTIME_CTX_CLOSURE: (&'static str, TextFieldHiddenClosure) = (
         "GET_TEST2_USING_RUNTIME_CTX_CLOSURE",
-        async_closure!((_, _, _, ctx, _, _) {
+        async_closure!((_, data_path, _, ctx, _, set) {
             if let Some(any) = ctx
                 && let Some(ctx) = any.downcast_ref::<HashMap<String, bool>>()
             {
+                set(data_path, Value::String("test3 value".to_string())).await;
                 return ctx.get(&"test2".to_string()).unwrap_or(&false).clone();
             }
             false
@@ -326,7 +348,6 @@ mod test {
             data: Some(ValueWrapper(json!({
                 "test1": "_",
                 "test2": "test2 value",
-                "test3": "test3 value",
                 "test4": "_"
             }))),
         };
