@@ -1,6 +1,5 @@
 use std::{any::Any, fmt::Display, pin::Pin, sync::Arc};
 
-use futures::future::BoxFuture;
 use linkme::distributed_slice;
 use minijinja::context;
 use rkyv::Archive;
@@ -8,7 +7,7 @@ use uuid::Uuid;
 
 use crate::{
     fields::{BoolValue, Field, prepare_value_for_datastar},
-    form::FormContext,
+    form::{FormContext, ValueGetter, ValueSetter},
     structs::data_path::DataPath,
     utils::capitalize_first,
 };
@@ -17,11 +16,11 @@ use crate::{
 pub static RYADNO_FIELDS_TEXTFIELD_HIDDEN_CLOUSRES: [(&'static str, TextFieldHiddenClosure)];
 pub type TextFieldHiddenClosure = for<'a> fn(
     &TextField,
-    data_path: DataPath,
+    data_path: Arc<DataPath>,
     from_context: &FormContext,
     runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
-    get: Arc<dyn Fn(DataPath) -> BoxFuture<'a, Option<serde_json::Value>> + Sync + Send + 'a>,
-    set: Arc<dyn Fn(DataPath, serde_json::Value) -> BoxFuture<'a, Option<DataPath>> + Sync + Send + 'a>,
+    get: ValueGetter<'a>,
+    set: ValueSetter<'a>,
 ) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>>;
 
 #[derive(Archive, rkyv::Serialize, rkyv::Deserialize, Debug, PartialEq, Eq)]
@@ -62,11 +61,11 @@ impl TextField {
 
     pub async fn is_hidden<'a>(
         &mut self,
-        data_path: DataPath,
+        data_path: Arc<DataPath>,
         from_context: &FormContext,
         runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
-        get: Arc<dyn Fn(DataPath) -> BoxFuture<'a, Option<serde_json::Value>> + Sync + Send + 'a>,
-        set: Arc<dyn Fn(DataPath, serde_json::Value) -> BoxFuture<'a, Option<DataPath>> + Sync + Send + 'a>,
+        get: ValueGetter<'a>,
+        set: ValueSetter<'a>,
     ) -> bool {
         match &self.hidden {
             BoolValue::Static(v) => v.clone(),
@@ -116,21 +115,22 @@ impl TextField {
 impl Field for TextField {
     async fn initial_hydration<'a>(
         &mut self,
-        data_path: DataPath,
+        data_path: Arc<DataPath>,
         form_context: &FormContext,
         runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
-        get: Arc<dyn Fn(DataPath) -> BoxFuture<'a, Option<serde_json::Value>> + Sync + Send + 'a>,
-        set: Arc<dyn Fn(DataPath, serde_json::Value) -> BoxFuture<'a, Option<DataPath>> + Sync + Send + 'a>,
+        get: ValueGetter<'a>,
+        set: ValueSetter<'a>,
     ) {
-        self.is_hidden = self.is_hidden(data_path, form_context, runtime_ctx, get, set).await;
+        self.is_hidden = self.is_hidden(data_path.clone(), form_context, runtime_ctx.clone(), get.clone(), set.clone()).await;
     }
 
-    async fn after_update(
+    async fn after_update<'a>(
         &mut self,
-        value: serde_json::Value,
-        old_value: serde_json::Value,
-        from_context: &FormContext,
-        runtime_ctx: Option<&dyn Any>,
+        data_path: Arc<DataPath>,
+        form_context: &FormContext,
+        runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
+        get: ValueGetter<'a>,
+        set: ValueSetter<'a>,
     ) {
         // TODO: update self based on new value, form context and other modifiers field have
     }
@@ -138,7 +138,7 @@ impl Field for TextField {
     fn to_html(
         &self,
         mjenv: &minijinja::Environment<'_>,
-        state_path: DataPath,
+        state_path: &DataPath,
         value: Option<&serde_json::Value>,
         from_context: &FormContext,
     ) -> Result<String, minijinja::Error> {

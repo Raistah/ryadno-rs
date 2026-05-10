@@ -51,7 +51,7 @@ where
                 let setter = value_setter!(&value_amx_clone);
 
                 for field in self.schema.iter_mut() {
-                    let state_path = DataPath::from(field.get_name());
+                    let state_path = Arc::new(DataPath::from(field.get_name()));
                     field
                         .initial_hydration(
                             state_path.clone(),
@@ -70,7 +70,7 @@ where
                         field
                             .to_html(
                                 mjenv,
-                                state_path.clone(),
+                                state_path.as_ref(),
                                 field_value.as_ref(),
                                 &self.form_ctx,
                             )?
@@ -90,10 +90,10 @@ where
                 let setter = value_setter!(&value_amx_clone);
 
                 for field in self.schema.iter_mut() {
-                    let state_path = DataPath::from(field.get_name());
+                    let state_path = Arc::new(DataPath::from(field.get_name()));
                     field
                         .initial_hydration(
-                            state_path,
+                            state_path.clone(),
                             &self.form_ctx,
                             ctx.clone(),
                             getter.clone(),
@@ -105,7 +105,7 @@ where
                         field
                             .to_html(
                                 mjenv,
-                                DataPath::from(field.get_name()),
+                                &DataPath::from(field.get_name()),
                                 None,
                                 &self.form_ctx,
                             )?
@@ -131,10 +131,11 @@ where
     }
 }
 
+pub type ValueGetter<'a> = Arc<dyn Fn(Arc<DataPath>) -> BoxFuture<'a, Option<Value>> + Sync + Send + 'a>;
 #[macro_export]
 macro_rules! value_getter {
     ($value:expr) => {
-        Arc::new(move |data_path: DataPath| -> BoxFuture<Option<Value>> {
+        Arc::new(move |data_path: Arc<DataPath>| -> BoxFuture<Option<Value>> {
             let lock_handle = Arc::clone(&$value);
 
             async move {
@@ -146,11 +147,12 @@ macro_rules! value_getter {
     };
 }
 
+pub type ValueSetter<'a> = Arc<dyn Fn(Arc<DataPath>, Value) -> BoxFuture<'a, Option<DataPath>> + Sync + Send + 'a>;
 #[macro_export]
 macro_rules! value_setter {
     ($value:expr) => {
         Arc::new(
-            move |data_path: DataPath, value: Value| -> BoxFuture<Option<DataPath>> {
+            move |data_path: Arc<DataPath>, value: Value| -> BoxFuture<Option<DataPath>> {
                 let lock_handle = Arc::clone(&$value);
 
                 async move {
@@ -308,7 +310,7 @@ mod test {
     pub static GET_TEST3_USING_GETTER_CLOSURE: (&'static str, TextFieldHiddenClosure) = (
         "GET_TEST3_USING_GETTER_CLOSURE",
         async_closure!((_, _, _, _, get, _) {
-            if Some(Value::String("test3 value".to_string())) == get(DataPath::from("test3")).await {
+            if Some(Value::String("test3 value".to_string())) == get(Arc::new(DataPath::from("test3"))).await {
                 return true;
             }
             false
