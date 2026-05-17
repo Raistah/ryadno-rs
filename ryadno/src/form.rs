@@ -25,7 +25,7 @@ use crate::{
 pub struct Form<T: Field + Archive + Debug + Eq + PartialEq> {
     pub schema: Vec<T>,
     pub uuid: String,
-    pub form_ctx: FormContext,
+    pub form_ctx: Arc<FormContext>,
     pub data: Option<ValueWrapper>,
 }
 
@@ -60,7 +60,7 @@ where
             field.set_data_path(data_path.clone());
 
             field
-                .initial_hydration(&self.form_ctx, ctx.clone(), getter.clone(), setter.clone())
+                .initial_hydration(self.form_ctx.clone(), ctx.clone(), getter.clone(), setter.clone())
                 .await;
         }
 
@@ -70,7 +70,7 @@ where
                     .to_html(
                         mjenv,
                         getter(field.get_data_path()).await.as_ref(),
-                        &self.form_ctx,
+                        self.form_ctx.clone(),
                     )?
                     .as_str(),
             );
@@ -138,7 +138,7 @@ where
                 }
             } {
                 field
-                    .after_update(&self.form_ctx, ctx.clone(), getter.clone(), setter.clone())
+                    .after_update(self.form_ctx.clone(), ctx.clone(), getter.clone(), setter.clone())
                     .await;
             }
         }
@@ -156,7 +156,7 @@ where
                 field.push_change(
                     mjenv,
                     getter(field_path.clone()).await.as_ref(),
-                    &self.form_ctx,
+                    self.form_ctx.clone(),
                     render_registry_ref,
                     change_push,
                 );
@@ -170,7 +170,7 @@ where
                 field.push_change(
                     mjenv,
                     getter(field_path).await.as_ref(),
-                    &self.form_ctx,
+                    self.form_ctx.clone(),
                     render_registry_ref,
                     change_push,
                 );
@@ -365,11 +365,11 @@ mod test {
                 TextField::make("first_name".to_string()).into(),
                 TextField::make("last_name".to_string()).into(),
             ],
-            form_ctx: FormContext {
+            form_ctx: Arc::new(FormContext {
                 update_endpoint: "".to_string(),
                 headers: HashMap::new(),
                 extra: HashMap::new(),
-            },
+            }),
             uuid: "".to_string(),
             data: None,
         };
@@ -386,11 +386,11 @@ mod test {
                 TextField::make("first_name".to_string()).into(),
                 TextField::make("last_name".to_string()).into(),
             ],
-            form_ctx: FormContext {
+            form_ctx: Arc::new(FormContext {
                 update_endpoint: "".to_string(),
                 headers: HashMap::new(),
                 extra: HashMap::new(),
-            },
+            }),
             uuid: "".to_string(),
             data: Some(ValueWrapper(json!({
                 "first_name": "hehe",
@@ -460,11 +460,11 @@ mod test {
                     .hidden(BoolValue::Closure(GET_TEST3_USING_GETTER_CLOSURE.0.into()))
                     .into(),
             ],
-            form_ctx: FormContext {
+            form_ctx: Arc::new(FormContext {
                 update_endpoint: "".to_string(),
                 headers: HashMap::new(),
                 extra: HashMap::new(),
-            },
+            }),
             uuid: "".to_string(),
             data: Some(ValueWrapper(json!({
                 "test1": "_",

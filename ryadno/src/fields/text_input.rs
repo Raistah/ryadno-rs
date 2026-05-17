@@ -19,7 +19,7 @@ use crate::{
 pub static RYADNO_FIELDS_TEXTFIELD_HIDDEN_CLOUSRES: [(&'static str, TextFieldHiddenClosure)];
 pub type TextFieldHiddenClosure = for<'a> fn(
     &TextField,
-    form_context: &FormContext,
+    form_context: Arc<FormContext>,
     runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
     get: ValueGetter<'a>,
     set: ValueSetter<'a>,
@@ -65,7 +65,7 @@ impl TextField {
 
     pub async fn is_hidden<'a>(
         &mut self,
-        form_context: &FormContext,
+        form_context: Arc<FormContext>,
         runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
         get: ValueGetter<'a>,
         set: ValueSetter<'a>,
@@ -126,7 +126,7 @@ impl Field for TextField {
 
     async fn initial_hydration<'a>(
         &mut self,
-        form_context: &FormContext,
+        form_context: Arc<FormContext>,
         runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
         get: ValueGetter<'a>,
         set: ValueSetter<'a>,
@@ -138,7 +138,7 @@ impl Field for TextField {
 
     async fn after_update<'a>(
         &mut self,
-        form_context: &FormContext,
+        form_context: Arc<FormContext>,
         runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
         get: ValueGetter<'a>,
         set: ValueSetter<'a>,
@@ -151,7 +151,7 @@ impl Field for TextField {
         &self,
         mjenv: &minijinja::Environment<'_>,
         value: Option<&serde_json::Value>,
-        form_context: &FormContext,
+        form_context: Arc<FormContext>,
     ) -> Result<String, minijinja::Error> {
         let value = match value {
             None => "null".to_string(),
@@ -176,7 +176,7 @@ impl Field for TextField {
         &self,
         mjenv: &minijinja::Environment<'_>,
         value: Option<&serde_json::Value>,
-        form_context: &FormContext,
+        form_context: Arc<FormContext>,
         _: &mut Vec<Arc<DataPath>>,
         push: ChangePusher,
     ) {

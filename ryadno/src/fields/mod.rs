@@ -22,7 +22,7 @@ pub trait Field: Archive + Debug + Eq + PartialEq {
     /// Form calls this method before generate html for the first time
     async fn initial_hydration<'a>(
         &mut self,
-        form_context: &FormContext,
+        form_context: Arc<FormContext>,
         runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
         get: ValueGetter<'a>,
         set: ValueSetter<'a>,
@@ -32,7 +32,7 @@ pub trait Field: Archive + Debug + Eq + PartialEq {
     /// Form calls this method after any change if this field live property set to **true**
     async fn after_update<'a>(
         &mut self,
-        form_context: &FormContext,
+        form_context: Arc<FormContext>,
         runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
         get: ValueGetter<'a>,
         set: ValueSetter<'a>,
@@ -42,14 +42,14 @@ pub trait Field: Archive + Debug + Eq + PartialEq {
         &self,
         mjenv: &Environment<'_>,
         value: Option<&Value>,
-        form_context: &FormContext,
+        form_context: Arc<FormContext>,
     ) -> Result<String, minijinja::Error>;
 
     fn push_change(
         &self,
         mjenv: &minijinja::Environment<'_>,
         value: Option<&serde_json::Value>,
-        form_context: &FormContext,
+        form_context: Arc<FormContext>,
         render_registry: &mut Vec<Arc<DataPath>>,
         push: ChangePusher,
     );
@@ -106,7 +106,7 @@ macro_rules! register_field_type_enum {
 
 	        async fn initial_hydration<'a>(
 	            &mut self,
-	            form_context: &FormContext,
+	            form_context: Arc<FormContext>,
 	            runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
 				get: $crate::form::ValueGetter<'a>,
                 set: $crate::form::ValueSetter<'a>,
@@ -118,7 +118,7 @@ macro_rules! register_field_type_enum {
 
             async fn after_update<'a>(
                 &mut self,
-                form_context: &FormContext,
+                form_context: Arc<FormContext>,
                 runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
                 get: $crate::form::ValueGetter<'a>,
                 set: $crate::form::ValueSetter<'a>,
@@ -132,7 +132,7 @@ macro_rules! register_field_type_enum {
                 &self,
                 mjenv: &$crate::minijinja::Environment<'_>,
                 value: Option<&$crate::serde_json::Value>,
-                form_context: &FormContext,
+                form_context: Arc<FormContext>,
             ) -> Result<String, $crate::minijinja::Error> {
                 match self {
                     $(Self::$variant(v) => v.to_html(mjenv, value, form_context)),*
@@ -143,7 +143,7 @@ macro_rules! register_field_type_enum {
                 &self,
                 mjenv: &minijinja::Environment<'_>,
                 value: Option<&serde_json::Value>,
-                form_context: &FormContext,
+                form_context: Arc<FormContext>,
                 render_registry: &mut Vec<Arc<DataPath>>,
                 push: ChangePusher,
             ) {
