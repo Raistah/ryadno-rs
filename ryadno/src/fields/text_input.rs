@@ -6,9 +6,12 @@ use rkyv::Archive;
 use uuid::Uuid;
 
 use crate::{
-    fields::{BoolValue, Field, prepare_value_for_datastar},
-    form::{FormContext, ValueGetter, ValueSetter},
-    structs::data_path::DataPath,
+    fields::{BoolValue, Field, LiveType, prepare_value_for_datastar},
+    form::{ChangePusher, FormContext, ValueGetter, ValueSetter},
+    structs::{
+        data_path::DataPath,
+        field_change::FieldChangeResult,
+    },
     utils::capitalize_first,
 };
 
@@ -16,8 +19,7 @@ use crate::{
 pub static RYADNO_FIELDS_TEXTFIELD_HIDDEN_CLOUSRES: [(&'static str, TextFieldHiddenClosure)];
 pub type TextFieldHiddenClosure = for<'a> fn(
     &TextField,
-    data_path: Arc<DataPath>,
-    from_context: &FormContext,
+    form_context: &FormContext,
     runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
     get: ValueGetter<'a>,
     set: ValueSetter<'a>,
@@ -27,8 +29,9 @@ pub type TextFieldHiddenClosure = for<'a> fn(
 pub struct TextField {
     uuid: String,
     name: String,
+    data_path: Arc<DataPath>,
     label: String,
-    live: bool,
+    live: LiveType,
     hidden: BoolValue,
     is_hidden: bool,
     input_type: TextFieldType,
@@ -40,17 +43,18 @@ impl TextField {
 
         Self {
             uuid: Uuid::new_v4().to_string(),
-            name,
+            name: name.clone(),
+            data_path: Arc::new(DataPath::from(name)),
             label,
-            live: false,
+            live: LiveType::Static(false),
             hidden: BoolValue::Static(false),
             is_hidden: false,
             input_type: TextFieldType::Text,
         }
     }
 
-    pub fn live(mut self) -> Self {
-        self.live = true;
+    pub fn live(mut self, live_type: LiveType) -> Self {
+        self.live = live_type;
         self
     }
 
@@ -61,8 +65,7 @@ impl TextField {
 
     pub async fn is_hidden<'a>(
         &mut self,
-        data_path: Arc<DataPath>,
-        from_context: &FormContext,
+        form_context: &FormContext,
         runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
         get: ValueGetter<'a>,
         set: ValueSetter<'a>,
@@ -74,7 +77,7 @@ impl TextField {
                     .iter()
                     .find(|closure| closure.0 == handler.as_str())
                 {
-                    Some(closure) => (closure.1)(self, data_path, from_context, runtime_ctx, get, set).await,
+                    Some(closure) => (closure.1)(self, form_context, runtime_ctx, get, set).await,
                     None => false,
                 }
             }
@@ -113,34 +116,42 @@ impl TextField {
 }
 
 impl Field for TextField {
+    fn get_data_path(&self) -> Arc<DataPath> {
+        self.data_path.clone()
+    }
+
+    fn set_data_path(&mut self, data_path: Arc<DataPath>) {
+        self.data_path = data_path;
+    }
+
     async fn initial_hydration<'a>(
         &mut self,
-        data_path: Arc<DataPath>,
         form_context: &FormContext,
         runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
         get: ValueGetter<'a>,
         set: ValueSetter<'a>,
     ) {
-        self.is_hidden = self.is_hidden(data_path.clone(), form_context, runtime_ctx.clone(), get.clone(), set.clone()).await;
+        self.is_hidden = self
+            .is_hidden(form_context, runtime_ctx.clone(), get.clone(), set.clone())
+            .await;
     }
 
     async fn after_update<'a>(
         &mut self,
-        data_path: Arc<DataPath>,
         form_context: &FormContext,
         runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
         get: ValueGetter<'a>,
         set: ValueSetter<'a>,
     ) {
         // TODO: update self based on new value, form context and other modifiers field have
+        todo!()
     }
 
     fn to_html(
         &self,
         mjenv: &minijinja::Environment<'_>,
-        state_path: &DataPath,
         value: Option<&serde_json::Value>,
-        from_context: &FormContext,
+        form_context: &FormContext,
     ) -> Result<String, minijinja::Error> {
         let value = match value {
             None => "null".to_string(),
@@ -153,20 +164,34 @@ impl Field for TextField {
                 uuid => self.uuid,
                 label => self.label,
                 name => self.name,
-                state_path => state_path.to_string(),
+                state_path => self.data_path.to_string(),
                 hidden => self.is_hidden,
                 input_type => self.input_type.to_string(),
                 value => value,
-                form_context => from_context
+                form_context => form_context
             })
+    }
+
+    fn push_change(
+        &self,
+        mjenv: &minijinja::Environment<'_>,
+        value: Option<&serde_json::Value>,
+        form_context: &FormContext,
+        _: &mut Vec<Arc<DataPath>>,
+        push: ChangePusher,
+    ) {
+        match self.to_html(mjenv, value, form_context) {
+            Ok(v) => push(self.get_data_path(), FieldChangeResult::Ok(v)),
+            Err(v) => push(self.get_data_path(), FieldChangeResult::Err(v.to_string())),
+        };
     }
 
     fn validate(&self, value: serde_json::Value) -> Result<(), Vec<(String, String)>> {
         Ok(())
     }
 
-    fn is_live(&self) -> bool {
-        self.live
+    fn is_live(&self) -> &LiveType {
+        &self.live
     }
 
     fn get_name(&self) -> &str {

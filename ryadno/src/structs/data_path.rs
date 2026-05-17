@@ -1,15 +1,16 @@
 use std::fmt::Display;
 
+use rkyv::Archive;
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Archive, rkyv::Serialize, rkyv::Deserialize, Serialize, PartialEq, Eq)]
 pub struct DataPath {
     segments: Vec<Segment>,
     is_absolute: bool,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Archive, rkyv::Serialize, rkyv::Deserialize, Serialize, PartialEq, Eq)]
 pub enum Segment {
     Index(usize),
     Key(String),
@@ -54,6 +55,14 @@ impl DataPath {
     pub fn extend(mut self, end: DataPath) -> Self {
         self.segments.extend(end.segments);
         self.normalize()
+    }
+
+    pub fn len(&self) -> usize {
+        self.segments.len()
+    }
+
+    pub fn get(&self, index: usize) -> Option<&Segment> {
+        self.segments.get(index)
     }
 
     pub fn normalize(mut self) -> Self {
@@ -283,6 +292,30 @@ impl DataPath {
         *found_value = value;
 
         Some(final_data_path)
+    }
+
+    pub fn includes(&self, other_path: &DataPath) -> bool {
+        let other_path_len = other_path.len();
+        if self.len() < other_path_len {
+            return false;
+        }
+
+        for (index, segment) in self.segments.iter().enumerate() {
+            if index >= other_path_len {
+                break;
+            }
+
+            match other_path.get(index) {
+                Some(v) => {
+                    if v != segment {
+                        return false
+                    }
+                }
+                _ => return false,
+            }
+        }
+
+        return true;
     }
 }
 
@@ -674,7 +707,6 @@ mod test {
         });
         let test_dp_9 = DataPath::from("item1/[2]/[1]/item1".to_string());
         let test_fdp_9 = test_dp_9.set_value(&mut test_data_9, json!(1), ValueUpdateStrategy::Flex);
-        println!("{:?}: {:?}", test_fdp_9, test_data_9);
         assert_eq!(
             test_fdp_9,
             Some(DataPath::from("item1/[0]/[0]/item1".to_string()))
@@ -705,7 +737,6 @@ mod test {
         let test_dp_10 = DataPath::from("item1/item1/item1/item1".to_string());
         let test_fdp_10 =
             test_dp_10.set_value(&mut test_data_10, json!(1), ValueUpdateStrategy::Flex);
-        println!("{:?}: {:?}", test_fdp_10, test_data_10);
         assert_eq!(
             test_fdp_10,
             Some(DataPath::from("item1/item1/item1/item1".to_string()))
@@ -721,6 +752,30 @@ mod test {
                     }
                 }
             })
+        );
+    }
+
+    #[test]
+    fn test_data_path_includes() {
+        let path = DataPath::from("item1/[2]/item2/[0]");
+        assert_eq!(path.includes(&DataPath::from("item1/[2]/item2/[0]")), true);
+
+        let path = DataPath::from("item1/[1]/item2/[1]");
+        assert_eq!(path.includes(&DataPath::from("item1/[1]/item2/[3]")), false);
+
+        let path = DataPath::from("item1/[1]/item3");
+        assert_eq!(path.includes(&DataPath::from("item1/[0]/item2/[0]")), false);
+
+        let path = DataPath::from("item1/[2]/item2/item3");
+        assert_eq!(
+            path.includes(&DataPath::from("item1/[2]/item2")),
+            true
+        );
+
+        let path = DataPath::from("item1/[0]/[1]/[2]/[3]");
+        assert_eq!(
+            path.includes(&DataPath::from("item1/[0]/[1]/[2]")),
+            true
         );
     }
 }

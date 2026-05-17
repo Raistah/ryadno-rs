@@ -10,16 +10,18 @@ use serde_json::Value;
 
 use crate::{
     fields::text_input::TextField,
-    form::{FormContext, ValueGetter, ValueSetter},
-    structs::data_path::DataPath,
+    form::{ChangePusher, FormContext, ValueGetter, ValueSetter},
+    structs::{data_path::DataPath, field_dep::FieldDep},
 };
 
 pub trait Field: Archive + Debug + Eq + PartialEq {
+    fn get_data_path(&self) -> Arc<DataPath>;
+    fn set_data_path(&mut self, data_path: Arc<DataPath>);
+
     /// Lifecycle method.
     /// Form calls this method before generate html for the first time
     async fn initial_hydration<'a>(
         &mut self,
-        data_path: Arc<DataPath>,
         form_context: &FormContext,
         runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
         get: ValueGetter<'a>,
@@ -30,7 +32,6 @@ pub trait Field: Archive + Debug + Eq + PartialEq {
     /// Form calls this method after any change if this field live property set to **true**
     async fn after_update<'a>(
         &mut self,
-        data_path: Arc<DataPath>,
         form_context: &FormContext,
         runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
         get: ValueGetter<'a>,
@@ -40,14 +41,23 @@ pub trait Field: Archive + Debug + Eq + PartialEq {
     fn to_html(
         &self,
         mjenv: &Environment<'_>,
-        state_path: &DataPath,
         value: Option<&Value>,
         form_context: &FormContext,
     ) -> Result<String, minijinja::Error>;
+
+    fn push_change(
+        &self,
+        mjenv: &minijinja::Environment<'_>,
+        value: Option<&serde_json::Value>,
+        form_context: &FormContext,
+        render_registry: &mut Vec<Arc<DataPath>>,
+        push: ChangePusher,
+    );
+
     fn validate(&self, value: Value) -> Result<(), Vec<(String, String)>>;
     fn get_name(&self) -> &str;
     fn get_uuid(&self) -> &str;
-    fn is_live(&self) -> bool;
+    fn is_live(&self) -> &LiveType;
 }
 
 pub fn prepare_value_for_datastar(value: &Value) -> String {
@@ -82,42 +92,63 @@ macro_rules! register_field_type_enum {
         )*
 
         impl Field for $enum_name {
+            fn get_data_path(&self) -> Arc<DataPath> {
+                match self {
+	                $(Self::$variant(v) => v.get_data_path()),*
+	            }
+            }
+
+            fn set_data_path(&mut self, data_path: Arc<DataPath>) {
+                match self {
+	                $(Self::$variant(v) => v.set_data_path(data_path)),*
+	            }
+            }
 
 	        async fn initial_hydration<'a>(
 	            &mut self,
-	            data_path: Arc<DataPath>,
 	            form_context: &FormContext,
 	            runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
 				get: $crate::form::ValueGetter<'a>,
                 set: $crate::form::ValueSetter<'a>,
 	        ) {
 	            match self {
-	                $(Self::$variant(v) => v.initial_hydration(data_path, form_context, runtime_ctx, get, set)),*
+	                $(Self::$variant(v) => v.initial_hydration(form_context, runtime_ctx, get, set)),*
 	            }.await
 	        }
 
             async fn after_update<'a>(
                 &mut self,
-                data_path: Arc<DataPath>,
                 form_context: &FormContext,
                 runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
                 get: $crate::form::ValueGetter<'a>,
                 set: $crate::form::ValueSetter<'a>,
             ) {
                 match self {
-                    $(Self::$variant(v) => v.after_update(data_path, form_context, runtime_ctx, get, set)),*
+                    $(Self::$variant(v) => v.after_update(form_context, runtime_ctx, get, set)),*
                 }.await
             }
 
             fn to_html(
                 &self,
                 mjenv: &$crate::minijinja::Environment<'_>,
-                state_path: &DataPath,
                 value: Option<&$crate::serde_json::Value>,
                 form_context: &FormContext,
             ) -> Result<String, $crate::minijinja::Error> {
                 match self {
-                    $(Self::$variant(v) => v.to_html(mjenv, state_path, value, form_context)),*
+                    $(Self::$variant(v) => v.to_html(mjenv, value, form_context)),*
+                }
+            }
+
+            fn push_change(
+                &self,
+                mjenv: &minijinja::Environment<'_>,
+                value: Option<&serde_json::Value>,
+                form_context: &FormContext,
+                render_registry: &mut Vec<Arc<DataPath>>,
+                push: ChangePusher,
+            ) {
+                match self {
+                    $(Self::$variant(v) => v.push_change(mjenv, value, form_context, render_registry, push)),*
                 }
             }
 
@@ -127,7 +158,7 @@ macro_rules! register_field_type_enum {
                 }
             }
 
-            fn is_live(&self) -> bool {
+            fn is_live(&self) -> &LiveType {
                 match self {
                     $(Self::$variant(v) => v.is_live()),*
                 }
@@ -149,6 +180,12 @@ macro_rules! register_field_type_enum {
 }
 
 #[derive(Archive, rkyv::Serialize, rkyv::Deserialize, Debug, PartialEq, Eq)]
+pub enum LiveType {
+    Static(bool),
+    Conditinal(Vec<FieldDep>),
+}
+
+#[derive(Archive, rkyv::Serialize, rkyv::Deserialize, Debug, PartialEq, Eq)]
 pub enum BoolValue {
     Static(bool),
     Closure(String),
@@ -162,6 +199,20 @@ register_field_type_enum! {
 
 #[macro_export]
 macro_rules! async_closure {
+    ((field -> $path_id:ident, $from_ctx:pat, $runtime_ctx:pat, $get:pat, $set:pat) $body:block) => {
+        |field, $from_ctx, $runtime_ctx, $get, $set| {
+            // 1. Secretly clone the Arc handle out here in the sync frame
+            let data_path_clone = field.get_data_path();
+
+            Box::pin(async move {
+                // 2. Re-bind it locally inside the async block so the user
+                // can still write `field.data_path` naturally!
+                let $path_id = data_path_clone;
+
+                $body
+            })
+        }
+    };
     (($($arg:pat),*) $body:block) => {
         |$($arg),*| { Box::pin(async move $body) }
     };
