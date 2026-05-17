@@ -18,7 +18,7 @@ use crate::{
 #[distributed_slice]
 pub static RYADNO_FIELDS_TEXTFIELD_HIDDEN_CLOUSRES: [(&'static str, TextFieldHiddenClosure)];
 pub type TextFieldHiddenClosure = for<'a> fn(
-    &TextField,
+    data_path: Arc<DataPath>,
     form_context: Arc<FormContext>,
     runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
     get: ValueGetter<'a>,
@@ -77,7 +77,7 @@ impl TextField {
                     .iter()
                     .find(|closure| closure.0 == handler.as_str())
                 {
-                    Some(closure) => (closure.1)(self, form_context, runtime_ctx, get, set).await,
+                    Some(closure) => (closure.1)(self.get_data_path(), form_context, runtime_ctx, get, set).await,
                     None => false,
                 }
             }

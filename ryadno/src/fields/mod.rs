@@ -199,20 +199,6 @@ register_field_type_enum! {
 
 #[macro_export]
 macro_rules! async_closure {
-    ((field -> $path_id:ident, $from_ctx:pat, $runtime_ctx:pat, $get:pat, $set:pat) $body:block) => {
-        |field, $from_ctx, $runtime_ctx, $get, $set| {
-            // 1. Secretly clone the Arc handle out here in the sync frame
-            let data_path_clone = field.get_data_path();
-
-            Box::pin(async move {
-                // 2. Re-bind it locally inside the async block so the user
-                // can still write `field.data_path` naturally!
-                let $path_id = data_path_clone;
-
-                $body
-            })
-        }
-    };
     (($($arg:pat),*) $body:block) => {
         |$($arg),*| { Box::pin(async move $body) }
     };

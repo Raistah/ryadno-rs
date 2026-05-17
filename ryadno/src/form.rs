@@ -414,11 +414,11 @@ mod test {
     #[distributed_slice(RYADNO_FIELDS_TEXTFIELD_HIDDEN_CLOUSRES)]
     pub static GET_TEST2_USING_RUNTIME_CTX_CLOSURE: (&'static str, TextFieldHiddenClosure) = (
         "GET_TEST2_USING_RUNTIME_CTX_CLOSURE",
-        async_closure!((field -> path, _, ctx, _, set) {
+        async_closure!((data_path, _, ctx, _, set) {
             if let Some(any) = ctx
                 && let Some(ctx) = any.downcast_ref::<HashMap<String, bool>>()
             {
-                set(path, Value::String("test3 value".to_string())).await;
+                set(data_path, Value::String("test3 value".to_string())).await;
                 return ctx.get(&"test2".to_string()).unwrap_or(&false).clone();
             }
             false
