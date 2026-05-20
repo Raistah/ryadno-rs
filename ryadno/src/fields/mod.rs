@@ -4,6 +4,7 @@ pub mod text_input;
 
 use std::{any::Any, fmt::Debug, sync::Arc};
 
+use async_trait;
 use minijinja::Environment;
 use rkyv::Archive;
 use serde_json::Value;
@@ -14,6 +15,7 @@ use crate::{
     structs::{data_path::DataPath, error::Error, field_dep::FieldDep},
 };
 
+#[async_trait::async_trait]
 pub trait Field: Archive + Debug + Eq + PartialEq {
     fn get_data_path(&self) -> Arc<DataPath>;
     fn set_data_path(&mut self, data_path: Arc<DataPath>);
@@ -105,6 +107,7 @@ macro_rules! register_field_type_enum {
             }
         )*
 
+        #[async_trait::async_trait]
         impl Field for $enum_name {
             fn get_data_path(&self) -> Arc<DataPath> {
                 match self {

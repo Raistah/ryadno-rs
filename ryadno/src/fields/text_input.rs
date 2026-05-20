@@ -117,6 +117,7 @@ impl TextField {
     }
 }
 
+#[async_trait::async_trait]
 impl Field for TextField {
     fn get_data_path(&self) -> Arc<DataPath> {
         self.data_path.clone()

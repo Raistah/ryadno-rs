@@ -306,7 +306,7 @@ macro_rules! value_setter {
     };
 }
 
-pub type RenderRegistryPusher<'a> = Arc<dyn Fn(Arc<DataPath>) -> BoxFuture<'a, ()>>;
+pub type RenderRegistryPusher<'a> = Arc<dyn Fn(Arc<DataPath>) -> BoxFuture<'a, ()> + Send + Sync>;
 #[macro_export]
 macro_rules! render_registry_pusher {
     ($registry:expr) => {
@@ -478,7 +478,7 @@ mod test {
     #[distributed_slice(RYADNO_FIELDS_TEXTFIELD_HIDDEN_CLOUSRES)]
     pub static GET_TEST2_USING_RUNTIME_CTX_CLOSURE: (&'static str, TextFieldHiddenClosure) = (
         "GET_TEST2_USING_RUNTIME_CTX_CLOSURE",
-        async_closure!((data_path, _, ctx, _, set) {
+        async_closure!((_, _, ctx, _, set) {
             if let Some(any) = ctx
                 && let Some(ctx) = any.downcast_ref::<HashMap<String, bool>>()
             {

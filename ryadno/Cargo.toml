@@ -29,3 +29,4 @@ tower-sessions-redis-store = "0.16.0"
 uuid = { version = "1.22.0", features = ["v4"] }
 validator = { version = "0.20.0", features = ["derive"] }
 tokio = { version = "1.52.1", features = ["macros", "test-util", "rt-multi-thread"] }
+async-trait = "0.1.89"
