@@ -29,7 +29,7 @@ pub trait Field: Archive + Debug + Eq + PartialEq {
     );
 
     /// Lifecycle method.
-    /// Form calls this method if current field updated
+    /// Form calls this method if current field or its child is updated
     async fn process_update<'a>(
         &mut self,
         update: Arc<Update>,
