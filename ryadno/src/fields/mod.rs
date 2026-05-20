@@ -10,8 +10,8 @@ use serde_json::Value;
 
 use crate::{
     fields::text_input::TextField,
-    form::{ChangePusher, FormContext, ValueGetter, ValueSetter},
-    structs::{data_path::DataPath, field_dep::FieldDep},
+    form::{ChangePusher, FormContext, RenderRegistryPusher, Update, ValueGetter, ValueSetter},
+    structs::{data_path::DataPath, error::Error, field_dep::FieldDep},
 };
 
 pub trait Field: Archive + Debug + Eq + PartialEq {
@@ -29,13 +29,27 @@ pub trait Field: Archive + Debug + Eq + PartialEq {
     );
 
     /// Lifecycle method.
-    /// Form calls this method after any change if this field live property set to **true**
-    async fn after_update<'a>(
+    /// Form calls this method if current field updated
+    async fn process_update<'a>(
         &mut self,
+        update: Arc<Update>,
         form_context: Arc<FormContext>,
         runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
         get: ValueGetter<'a>,
         set: ValueSetter<'a>,
+        push: RenderRegistryPusher<'a>,
+    );
+
+    /// Lifecycle method.
+    /// Form calls this method after any change of other field if this field live property set to **true**
+    async fn after_update<'a>(
+        &mut self,
+        update: Arc<Update>,
+        form_context: Arc<FormContext>,
+        runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
+        get: ValueGetter<'a>,
+        set: ValueSetter<'a>,
+        push: RenderRegistryPusher<'a>,
     );
 
     fn to_html(
@@ -43,7 +57,7 @@ pub trait Field: Archive + Debug + Eq + PartialEq {
         mjenv: &Environment<'_>,
         value: Option<&Value>,
         form_context: Arc<FormContext>,
-    ) -> Result<String, minijinja::Error>;
+    ) -> Result<String, Error>;
 
     fn push_change(
         &self,
@@ -116,15 +130,31 @@ macro_rules! register_field_type_enum {
 	            }.await
 	        }
 
+			async fn process_update<'a>(
+                &mut self,
+                update: Arc<Update>,
+                form_context: Arc<FormContext>,
+                runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
+                get: ValueGetter<'a>,
+                set: ValueSetter<'a>,
+                push: RenderRegistryPusher<'a>,
+            ) {
+                match self {
+                    $(Self::$variant(v) => v.process_update(update, form_context, runtime_ctx, get, set, push)),*
+                }.await
+            }
+
             async fn after_update<'a>(
                 &mut self,
+                update: Arc<Update>,
                 form_context: Arc<FormContext>,
                 runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
                 get: $crate::form::ValueGetter<'a>,
                 set: $crate::form::ValueSetter<'a>,
+                push: $crate::form::RenderRegistryPusher<'a>,
             ) {
                 match self {
-                    $(Self::$variant(v) => v.after_update(form_context, runtime_ctx, get, set)),*
+                    $(Self::$variant(v) => v.after_update(update, form_context, runtime_ctx, get, set, push)),*
                 }.await
             }
 
@@ -133,7 +163,7 @@ macro_rules! register_field_type_enum {
                 mjenv: &$crate::minijinja::Environment<'_>,
                 value: Option<&$crate::serde_json::Value>,
                 form_context: Arc<FormContext>,
-            ) -> Result<String, $crate::minijinja::Error> {
+            ) -> Result<String, $crate::structs::error::Error> {
                 match self {
                     $(Self::$variant(v) => v.to_html(mjenv, value, form_context)),*
                 }

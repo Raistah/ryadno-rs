@@ -7,11 +7,11 @@ use uuid::Uuid;
 
 use crate::{
     fields::{BoolValue, Field, LiveType, prepare_value_for_datastar},
-    form::{ChangePusher, FormContext, ValueGetter, ValueSetter},
-    structs::{
-        data_path::DataPath,
-        field_change::FieldChangeResult,
+    form::{
+        ChangePusher, FormContext, RenderRegistryPusher, Update, UpdateType, ValueGetter,
+        ValueSetter,
     },
+    structs::{data_path::DataPath, error::Error, field_change},
     utils::capitalize_first,
 };
 
@@ -77,7 +77,9 @@ impl TextField {
                     .iter()
                     .find(|closure| closure.0 == handler.as_str())
                 {
-                    Some(closure) => (closure.1)(self.get_data_path(), form_context, runtime_ctx, get, set).await,
+                    Some(closure) => {
+                        (closure.1)(self.get_data_path(), form_context, runtime_ctx, get, set).await
+                    }
                     None => false,
                 }
             }
@@ -136,15 +138,39 @@ impl Field for TextField {
             .await;
     }
 
-    async fn after_update<'a>(
+    async fn process_update<'a>(
         &mut self,
+        update: Arc<Update>,
         form_context: Arc<FormContext>,
         runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
         get: ValueGetter<'a>,
         set: ValueSetter<'a>,
+        push: RenderRegistryPusher<'a>,
     ) {
-        // TODO: update self based on new value, form context and other modifiers field have
-        todo!()
+        match &update.update {
+            UpdateType::Value(v) => {
+                set(self.get_data_path(), v.clone()).await;
+            }
+            UpdateType::Action(_) => (),
+        }
+        self.after_update(update, form_context, runtime_ctx, get, set, push)
+            .await
+    }
+
+    async fn after_update<'a>(
+        &mut self,
+        _: Arc<Update>,
+        form_context: Arc<FormContext>,
+        runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
+        get: ValueGetter<'a>,
+        set: ValueSetter<'a>,
+        push: RenderRegistryPusher<'a>,
+    ) {
+        self.is_hidden = self
+            .is_hidden(form_context, runtime_ctx.clone(), get.clone(), set.clone())
+            .await;
+
+        push(self.get_data_path()).await;
     }
 
     fn to_html(
@@ -152,13 +178,13 @@ impl Field for TextField {
         mjenv: &minijinja::Environment<'_>,
         value: Option<&serde_json::Value>,
         form_context: Arc<FormContext>,
-    ) -> Result<String, minijinja::Error> {
+    ) -> Result<String, Error> {
         let value = match value {
             None => "null".to_string(),
             Some(v) => prepare_value_for_datastar(&v),
         };
 
-        mjenv
+        Ok(mjenv
             .get_template("ryadno/fields/text-input.jinja")?
             .render(context! {
                 uuid => self.uuid,
@@ -169,7 +195,7 @@ impl Field for TextField {
                 input_type => self.input_type.to_string(),
                 value => value,
                 form_context => form_context
-            })
+            })?)
     }
 
     fn push_change(
@@ -180,10 +206,15 @@ impl Field for TextField {
         _: &mut Vec<Arc<DataPath>>,
         push: ChangePusher,
     ) {
-        match self.to_html(mjenv, value, form_context) {
-            Ok(v) => push(self.get_data_path(), FieldChangeResult::Ok(v)),
-            Err(v) => push(self.get_data_path(), FieldChangeResult::Err(v.to_string())),
-        };
+        push(
+            self.get_data_path(),
+            field_change::ChangeType::RerenderField {
+                selector: format!(".field-{}", self.get_uuid()),
+                data: self
+                    .to_html(mjenv, value, form_context)
+                    .map_err(|v| v.to_string()),
+            },
+        )
     }
 
     fn validate(&self, value: serde_json::Value) -> Result<(), Vec<(String, String)>> {

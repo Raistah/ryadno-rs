@@ -1,10 +1,11 @@
 use std::fmt::Display;
 
 use rkyv::Archive;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
-#[derive(Debug, Clone, Archive, rkyv::Serialize, rkyv::Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Archive, rkyv::Serialize, rkyv::Deserialize, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(from = "String")]
 pub struct DataPath {
     segments: Vec<Segment>,
     is_absolute: bool,

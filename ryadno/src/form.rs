@@ -13,10 +13,11 @@ use tokio::sync::Mutex;
 
 use crate::{
     fields::{Field, LiveType},
-    push_change,
+    push_change, render_registry_pusher,
     structs::{
         data_path::DataPath,
-        field_change::{FieldChange, FieldChangeResult},
+        error::Error,
+        field_change::{self, FieldChange},
     },
     value_getter, value_setter,
 };
@@ -37,7 +38,7 @@ where
         &mut self,
         mjenv: &minijinja::Environment<'_>,
         runtime_ctx: impl Into<Option<Arc<C>>>,
-    ) -> Result<String, minijinja::Error> {
+    ) -> Result<String, Error> {
         let ctx_opt = runtime_ctx.into();
         let ctx: Option<Arc<dyn Any + Send + Sync>> =
             ctx_opt.map(|arc_c| arc_c as Arc<dyn Any + Send + Sync>);
@@ -60,7 +61,12 @@ where
             field.set_data_path(data_path.clone());
 
             field
-                .initial_hydration(self.form_ctx.clone(), ctx.clone(), getter.clone(), setter.clone())
+                .initial_hydration(
+                    self.form_ctx.clone(),
+                    ctx.clone(),
+                    getter.clone(),
+                    setter.clone(),
+                )
                 .await;
         }
 
@@ -84,24 +90,26 @@ where
             None => self.data = Some(ValueWrapper(std::mem::take(&mut *lock))),
         };
 
-        mjenv.get_template("ryadno/form.jinja")?.render(context! {
+        Ok(mjenv.get_template("ryadno/form.jinja")?.render(context! {
             html => rendered_fields
-        })
+        })?)
     }
 
     async fn to_html_no_ctx(
         &mut self,
         mjenv: &minijinja::Environment<'_>,
-    ) -> Result<String, minijinja::Error> {
+    ) -> Result<String, Error> {
         self.to_html::<()>(mjenv, None).await
     }
 
     async fn handle_update<'a, C: Any + Sync + Send>(
         &mut self,
-        update: UpdatePayload,
+        update: Update,
         mjenv: &minijinja::Environment<'_>,
         runtime_ctx: impl Into<Option<Arc<C>>>,
     ) -> Vec<FieldChange> {
+        let update_arc = Arc::new(update);
+
         let ctx_opt = runtime_ctx.into();
         let ctx: Option<Arc<dyn Any + Send + Sync>> =
             ctx_opt.map(|arc_c| arc_c as Arc<dyn Any + Send + Sync>);
@@ -120,29 +128,58 @@ where
         let render_registry_clone = render_registry.clone();
         let setter: ValueSetter = value_setter!(value_amx_clone, render_registry_clone);
 
-        todo!("assign value form update or process action");
+        let render_registry_clone = render_registry.clone();
+        let render_registry_pusher = render_registry_pusher!(render_registry_clone);
 
+        // Updated field should be updated first, so other fields that is depends on it can access its actual value with getter
         for field in self.schema.iter_mut() {
-            let state_path = Arc::new(DataPath::from(field.get_name()));
-            if match field.is_live() {
-                LiveType::Static(v) => v.clone(),
-                LiveType::Conditinal(deps) => {
-                    let mut res = false;
-                    for dep in deps {
-                        if dep.includes(state_path.as_ref()) {
-                            res = true;
-                            break;
-                        }
-                    }
-                    res
-                }
-            } {
+            if update_arc.path.includes(field.get_data_path().as_ref()) {
                 field
-                    .after_update(self.form_ctx.clone(), ctx.clone(), getter.clone(), setter.clone())
+                    .process_update(
+                        update_arc.clone(),
+                        self.form_ctx.clone(),
+                        ctx.clone(),
+                        getter.clone(),
+                        setter.clone(),
+                        render_registry_pusher.clone(),
+                    )
                     .await;
             }
         }
 
+        // check other fields that depends on updated field
+        for field in self.schema.iter_mut() {
+            // TODO: in this implementation only if this field is not live then live children will not be proccessed
+            // Potential solution is to propagate child live param on parent too. So repeater schema will be parsed, and all the deps will be assigned to repeater itself (on initial_hydration step)
+            if update_arc.path != *field.get_data_path()
+                && match field.is_live() {
+                    LiveType::Static(v) => v.clone(),
+                    LiveType::Conditinal(deps) => {
+                        let mut res = false;
+                        for dep in deps {
+                            if dep.includes(field.get_data_path().as_ref()) {
+                                res = true;
+                                break;
+                            }
+                        }
+                        res
+                    }
+                }
+            {
+                field
+                    .after_update(
+                        update_arc.clone(),
+                        self.form_ctx.clone(),
+                        ctx.clone(),
+                        getter.clone(),
+                        setter.clone(),
+                        render_registry_pusher.clone(),
+                    )
+                    .await;
+            }
+        }
+
+        // render all the changed fields
         let mut changes: Vec<FieldChange> = Vec::new();
         let change_push: ChangePusher = push_change!(changes);
         let mut render_registry_lock = render_registry.lock().await;
@@ -190,7 +227,7 @@ where
 
     async fn handle_update_no_ctx(
         &mut self,
-        update: UpdatePayload,
+        update: Update,
         mjenv: &minijinja::Environment<'_>,
     ) -> Vec<FieldChange> {
         self.handle_update::<()>(update, mjenv, None).await
@@ -240,13 +277,13 @@ macro_rules! value_setter {
             },
         )
     };
-    ($value:expr, $tracker:expr) => {
+    ($value:expr, $registry:expr) => {
         Arc::new(
             move |data_path: Arc<$crate::structs::data_path::DataPath>,
                   value: $crate::serde_json::Value|
                   -> BoxFuture<Option<$crate::structs::data_path::DataPath>> {
                 let lock_handle = Arc::clone(&$value);
-                let tracker_handle = Arc::clone(&$tracker);
+                let registry_handle = Arc::clone(&$registry);
 
                 async move {
                     let mut lock = lock_handle.lock().await;
@@ -257,9 +294,9 @@ macro_rules! value_setter {
                         $crate::structs::data_path::ValueUpdateStrategy::Flex,
                     );
 
-                    let mut tracker_lock = tracker_handle.lock().await;
-                    if !tracker_lock.contains(&data_path) {
-                        tracker_lock.push(data_path);
+                    let mut registry_lock = registry_handle.lock().await;
+                    if !registry_lock.contains(&data_path) {
+                        registry_lock.push(data_path);
                     }
                     result
                 }
@@ -269,13 +306,33 @@ macro_rules! value_setter {
     };
 }
 
-pub type ChangePusher<'a> = &'a mut dyn FnMut(Arc<DataPath>, FieldChangeResult);
+pub type RenderRegistryPusher<'a> = Arc<dyn Fn(Arc<DataPath>) -> BoxFuture<'a, ()>>;
+#[macro_export]
+macro_rules! render_registry_pusher {
+    ($registry:expr) => {
+        Arc::new(
+            move |data_path: Arc<$crate::structs::data_path::DataPath>| -> BoxFuture<()> {
+                let registry_handle = Arc::clone(&$registry);
+
+                async move {
+                    let mut registry_lock = registry_handle.lock().await;
+                    if !registry_lock.contains(&data_path) {
+                        registry_lock.push(data_path);
+                    }
+                }
+                .boxed()
+            },
+        )
+    };
+}
+
+pub type ChangePusher<'a> = &'a mut dyn FnMut(Arc<DataPath>, field_change::ChangeType);
 #[macro_export]
 macro_rules! push_change {
     ($changes:expr) => {
         // Creates a standard synchronous closure capturing a mutable reference
         &mut |data_path: std::sync::Arc<$crate::structs::data_path::DataPath>,
-              result: $crate::structs::field_change::FieldChangeResult| {
+              result: $crate::structs::field_change::ChangeType| {
             // Accesses and pushes straight to your stack-allocated vector
             $changes.push($crate::structs::field_change::FieldChange {
                 data_path: (*data_path).clone(),
@@ -307,10 +364,17 @@ pub struct FormContext {
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
-pub struct UpdatePayload {
+pub struct Update {
     pub uuid: String,
-    pub path: String,
-    pub value: Value,
+    pub field_uuid: String,
+    pub path: DataPath,
+    pub update: UpdateType,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+pub enum UpdateType {
+    Value(Value),
+    Action(Value),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -346,7 +410,7 @@ impl<D: Fallible + ?Sized> Deserialize<ValueWrapper, D> for ArchivedString {
 
 #[cfg(test)]
 mod test {
-    use crate::async_closure;
+    use crate::{async_closure, structs::field_change::ChangeType};
     use linkme::distributed_slice;
     use minijinja::{Environment, path_loader};
     use serde_json::json;
@@ -418,7 +482,7 @@ mod test {
             if let Some(any) = ctx
                 && let Some(ctx) = any.downcast_ref::<HashMap<String, bool>>()
             {
-                set(data_path, Value::String("test3 value".to_string())).await;
+                set(Arc::new(DataPath::from("test1")), Value::String("test1 value".to_string())).await;
                 return ctx.get(&"test2".to_string()).unwrap_or(&false).clone();
             }
             false
@@ -429,7 +493,10 @@ mod test {
     pub static GET_TEST3_USING_GETTER_CLOSURE: (&'static str, TextFieldHiddenClosure) = (
         "GET_TEST3_USING_GETTER_CLOSURE",
         async_closure!((_, _, _, get, _) {
-            if Some(Value::String("test3 value".to_string())) == get(Arc::new(DataPath::from("test3"))).await {
+            if
+                Some(Value::String("test1 value".to_string())) ==
+                get(Arc::new(DataPath::from("test1"))).await
+            {
                 return true;
             }
             false
@@ -437,7 +504,7 @@ mod test {
     );
 
     #[tokio::test]
-    async fn test_form_to_html_dynamic() {
+    async fn test_form_full_sycle() {
         let mut ctx: HashMap<String, bool> = HashMap::new();
         ctx.insert("test2".to_string(), true);
         let ctx = Arc::new(ctx);
@@ -479,10 +546,30 @@ mod test {
             path_loader("./src/templates")(real_name.as_str())
         });
 
-        let html = form.to_html(&env, ctx).await.unwrap();
+        let html = form.to_html(&env, ctx.clone()).await.unwrap();
         assert!(!html.contains(r#"<span class="block">Test1</span>"#));
         assert!(html.contains(r#"<span class="block">Test2</span>"#));
         assert!(!html.contains(r#"<span class="block">Test3</span>"#));
         assert!(!html.contains(r#"<span class="block">Test4</span>"#));
+
+        // Simulate form update
+        let field_to_update = form.schema.get(2).unwrap();
+        let field_uuid = field_to_update.get_uuid().to_string();
+        let path = field_to_update.get_data_path().as_ref().clone();
+        let update = Update {
+            uuid: form.uuid.clone(),
+            field_uuid: field_uuid.clone(),
+            path: path.clone(),
+            update: UpdateType::Value(Value::String("test3 changed".to_string())),
+        };
+
+        let changes = form.handle_update(update, &env, ctx).await;
+
+        assert_eq!(changes.len(), 2);
+        assert_eq!(changes[1].data_path, path);
+        assert_eq!(changes[1].result, ChangeType::RerenderField{
+            selector: format!(".field-{}", field_uuid),
+            data: Ok(format!("<div\n\tclass=\"field-{0}\"\n\tdata-signals=\"{{\n\t\t'{0}': {{\n\t\t\tvalue: 'test3 changed',\n\t\t\tpath: 'test3'\n\t\t}}\n\t}}\"\n>\n\t\n\t\n\n</div>", field_uuid))
+        });
     }
 }
