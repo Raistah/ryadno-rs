@@ -16,6 +16,7 @@ use crate::{
 };
 
 #[distributed_slice]
+#[linkme(crate = crate::linkme)]
 pub static RYADNO_FIELDS_TEXTFIELD_HIDDEN_CLOUSRES: [(&'static str, TextFieldHiddenClosure)];
 pub type TextFieldHiddenClosure = for<'a> fn(
     data_path: Arc<DataPath>,
@@ -207,13 +208,19 @@ impl Field for TextField {
         _: &mut Vec<Arc<DataPath>>,
         push: ChangePusher,
     ) {
+        let data = self
+            .to_html(mjenv, value, form_context)
+            .map_err(|v| v.to_string());
+        let selector = if data.is_ok() {
+            format!(".ryadno-field-{}", self.get_uuid())
+        } else {
+            format!(".ryadno-field-{} .ryadno-field-error", self.get_uuid())
+        };
         push(
             self.get_data_path(),
             field_change::ChangeType::RerenderField {
-                selector: format!(".field-{}", self.get_uuid()),
-                data: self
-                    .to_html(mjenv, value, form_context)
-                    .map_err(|v| v.to_string()),
+                selector: selector,
+                data: data,
             },
         )
     }

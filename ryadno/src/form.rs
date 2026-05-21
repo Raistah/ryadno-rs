@@ -10,6 +10,7 @@ use rkyv::{
 };
 use serde_json::Value;
 use tokio::sync::Mutex;
+use uuid::Uuid;
 
 use crate::{
     fields::{Field, LiveType},
@@ -25,7 +26,6 @@ use crate::{
 #[derive(Archive, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct Form<T: Field + Archive + Debug + Eq + PartialEq> {
     pub schema: Vec<T>,
-    pub uuid: String,
     pub form_ctx: Arc<FormContext>,
     pub data: Option<ValueWrapper>,
 }
@@ -34,7 +34,15 @@ impl<T> Form<T>
 where
     T: Field + Archive + Debug + Eq + PartialEq,
 {
-    async fn to_html<'a, C: Any + Sync + Send>(
+    pub fn new(schema: Vec<T>, form_ctx: Arc<FormContext>, data: Option<ValueWrapper>) -> Self {
+        Self {
+            schema,
+            form_ctx,
+            data,
+        }
+    }
+
+    pub async fn to_html<'a, C: Any + Sync + Send>(
         &mut self,
         mjenv: &minijinja::Environment<'_>,
         runtime_ctx: impl Into<Option<Arc<C>>>,
@@ -91,18 +99,19 @@ where
         };
 
         Ok(mjenv.get_template("ryadno/form.jinja")?.render(context! {
+            uuid => self.form_ctx.uuid,
             html => rendered_fields
         })?)
     }
 
-    async fn to_html_no_ctx(
+    pub async fn to_html_no_ctx(
         &mut self,
         mjenv: &minijinja::Environment<'_>,
     ) -> Result<String, Error> {
         self.to_html::<()>(mjenv, None).await
     }
 
-    async fn handle_update<'a, C: Any + Sync + Send>(
+    pub async fn handle_update<'a, C: Any + Sync + Send>(
         &mut self,
         update: Update,
         mjenv: &minijinja::Environment<'_>,
@@ -157,7 +166,7 @@ where
                     LiveType::Conditinal(deps) => {
                         let mut res = false;
                         for dep in deps {
-                            if dep.includes(field.get_data_path().as_ref()) {
+                            if dep.includes(&update_arc.path) {
                                 res = true;
                                 break;
                             }
@@ -225,7 +234,7 @@ where
         changes
     }
 
-    async fn handle_update_no_ctx(
+    pub async fn handle_update_no_ctx(
         &mut self,
         update: Update,
         mjenv: &minijinja::Environment<'_>,
@@ -326,7 +335,7 @@ macro_rules! render_registry_pusher {
     };
 }
 
-pub type ChangePusher<'a> = &'a mut dyn FnMut(Arc<DataPath>, field_change::ChangeType);
+pub type ChangePusher<'a> = &'a mut (dyn FnMut(Arc<DataPath>, field_change::ChangeType)+ Send);
 #[macro_export]
 macro_rules! push_change {
     ($changes:expr) => {
@@ -358,9 +367,25 @@ macro_rules! from_bytes {
 
 #[derive(Archive, Serialize, Deserialize, serde::Serialize, Debug, PartialEq, Eq)]
 pub struct FormContext {
+    pub uuid: String,
     pub update_endpoint: String,
     pub headers: HashMap<String, String>,
     pub extra: HashMap<String, String>,
+}
+
+impl FormContext {
+    pub fn new(
+        update_endpoint: String,
+        headers: HashMap<String, String>,
+        extra: HashMap<String, String>,
+    ) -> Self {
+        FormContext {
+            uuid: Uuid::new_v4().to_string(),
+            update_endpoint,
+            headers,
+            extra,
+        }
+    }
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
@@ -424,19 +449,18 @@ mod test {
 
     #[tokio::test]
     async fn test_rkyv_with_generic() {
-        let form = Form {
-            schema: vec![
+        let form = Form::new(
+            vec![
                 TextField::make("first_name".to_string()).into(),
                 TextField::make("last_name".to_string()).into(),
             ],
-            form_ctx: Arc::new(FormContext {
-                update_endpoint: "".to_string(),
-                headers: HashMap::new(),
-                extra: HashMap::new(),
-            }),
-            uuid: "".to_string(),
-            data: None,
-        };
+            Arc::new(FormContext::new(
+                "".to_string(),
+                HashMap::new(),
+                HashMap::new(),
+            )),
+            None,
+        );
 
         let bytes = to_bytes!(&form).unwrap();
         let restored_form = from_bytes!(Form<FieldTypes>, &bytes).unwrap();
@@ -445,22 +469,21 @@ mod test {
 
     #[tokio::test]
     async fn test_form_to_html() {
-        let mut form: Form<FieldTypes> = Form {
-            schema: vec![
+        let mut form: Form<FieldTypes> = Form::new(
+            vec![
                 TextField::make("first_name".to_string()).into(),
                 TextField::make("last_name".to_string()).into(),
             ],
-            form_ctx: Arc::new(FormContext {
-                update_endpoint: "".to_string(),
-                headers: HashMap::new(),
-                extra: HashMap::new(),
-            }),
-            uuid: "".to_string(),
-            data: Some(ValueWrapper(json!({
+            Arc::new(FormContext::new(
+                "".to_string(),
+                HashMap::new(),
+                HashMap::new(),
+            )),
+            Some(ValueWrapper(json!({
                 "first_name": "hehe",
                 "last_name": "hoho"
             }))),
-        };
+        );
 
         let mut env = Environment::new();
         env.set_loader(move |name| {
@@ -509,8 +532,8 @@ mod test {
         ctx.insert("test2".to_string(), true);
         let ctx = Arc::new(ctx);
 
-        let mut form: Form<FieldTypes> = Form {
-            schema: vec![
+        let mut form: Form<FieldTypes> = Form::new(
+            vec![
                 TextField::make("test1".to_string())
                     .hidden(BoolValue::Static(true))
                     .into(),
@@ -527,18 +550,17 @@ mod test {
                     .hidden(BoolValue::Closure(GET_TEST3_USING_GETTER_CLOSURE.0.into()))
                     .into(),
             ],
-            form_ctx: Arc::new(FormContext {
-                update_endpoint: "".to_string(),
-                headers: HashMap::new(),
-                extra: HashMap::new(),
-            }),
-            uuid: "".to_string(),
-            data: Some(ValueWrapper(json!({
+            Arc::new(FormContext::new(
+                "".to_string(),
+                HashMap::new(),
+                HashMap::new(),
+            )),
+            Some(ValueWrapper(json!({
                 "test1": "_",
                 "test2": "test2 value",
                 "test4": "_"
             }))),
-        };
+        );
 
         let mut env = Environment::new();
         env.set_loader(move |name| {
@@ -557,7 +579,7 @@ mod test {
         let field_uuid = field_to_update.get_uuid().to_string();
         let path = field_to_update.get_data_path().as_ref().clone();
         let update = Update {
-            uuid: form.uuid.clone(),
+            uuid: form.form_ctx.uuid.clone(),
             field_uuid: field_uuid.clone(),
             path: path.clone(),
             update: UpdateType::Value(Value::String("test3 changed".to_string())),
@@ -567,9 +589,15 @@ mod test {
 
         assert_eq!(changes.len(), 2);
         assert_eq!(changes[1].data_path, path);
-        assert_eq!(changes[1].result, ChangeType::RerenderField{
-            selector: format!(".field-{}", field_uuid),
-            data: Ok(format!("<div\n\tclass=\"field-{0}\"\n\tdata-signals=\"{{\n\t\t'{0}': {{\n\t\t\tvalue: 'test3 changed',\n\t\t\tpath: 'test3'\n\t\t}}\n\t}}\"\n>\n\t\n\t\n\n</div>", field_uuid))
-        });
+        assert_eq!(
+            changes[1].result,
+            ChangeType::RerenderField {
+                selector: format!(".ryadno-field-{}", field_uuid),
+                data: Ok(format!(
+                    "<div\n\tclass=\"field-{0}\"\n\tdata-signals=\"{{\n\t\t'{0}': {{\n\t\t\tvalue: 'test3 changed',\n\t\t\tpath: 'test3'\n\t\t}}\n\t}}\"\n>\n\t\n\t\n\n</div>",
+                    field_uuid
+                ))
+            }
+        );
     }
 }
