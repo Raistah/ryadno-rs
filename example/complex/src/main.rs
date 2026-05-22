@@ -70,7 +70,9 @@ pub static HIDE_IF_FIRST_NAME_IS_EMPTY: (&'static str, TextFieldHiddenClosure) =
     "HIDE_IF_FIRST_NAME_IS_EMPTY",
     async_closure!((_, _, _, get, _) {
         match get(Arc::new(DataPath::from("first_name"))).await {
-            Some(Value::String(v)) => v.len() == 0,
+            Some(Value::String(v)) => {
+                v.len() == 0
+            },
             _ => true
         }
     }),
@@ -149,6 +151,7 @@ async fn handle_form_update(
             let event = change.to_datastar_event(&form.form_ctx.uuid);
             yield Ok(event);
         }
+        store_form(form).await;
     };
 
     Ok(Sse::new(event_stream).keep_alive(KeepAlive::default()))

@@ -59,6 +59,15 @@ impl TextField {
         self
     }
 
+    fn update_field<T: PartialEq>(field: &mut T, new_value: T) -> bool {
+        if *field != new_value {
+            *field = new_value;
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn hidden(mut self, hidden: BoolValue) -> Self {
         self.hidden = hidden;
         self
@@ -168,11 +177,12 @@ impl Field for TextField {
         set: ValueSetter<'a>,
         push: RenderRegistryPusher<'a>,
     ) {
-        self.is_hidden = self
+        let new_is_hidden = self
             .is_hidden(form_context, runtime_ctx.clone(), get.clone(), set.clone())
             .await;
-
-        push(self.get_data_path()).await;
+        if Self::update_field(&mut self.is_hidden, new_is_hidden) {
+            push(self.get_data_path()).await;
+        }
     }
 
     fn to_html(

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["example/fullPanel","ryadno", "ryadno_macro"]
+members = ["example/complex","ryadno", "ryadno_macro"]
 exclude = ["examples"]
 
 [workspace.dependencies]

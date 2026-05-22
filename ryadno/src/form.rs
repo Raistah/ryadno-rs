@@ -143,13 +143,15 @@ where
         // Updated field should be updated first, so other fields that is depends on it can access its actual value with getter
         for field in self.schema.iter_mut() {
             if update_arc.path.includes(field.get_data_path().as_ref()) {
+                let value_amx_clone = value_amx.clone();
+                let setter_updated: ValueSetter = value_setter!(value_amx_clone);
                 field
                     .process_update(
                         update_arc.clone(),
                         self.form_ctx.clone(),
                         ctx.clone(),
                         getter.clone(),
-                        setter.clone(),
+                        setter_updated.clone(),
                         render_registry_pusher.clone(),
                     )
                     .await;
@@ -335,7 +337,7 @@ macro_rules! render_registry_pusher {
     };
 }
 
-pub type ChangePusher<'a> = &'a mut (dyn FnMut(Arc<DataPath>, field_change::ChangeType)+ Send);
+pub type ChangePusher<'a> = &'a mut (dyn FnMut(Arc<DataPath>, field_change::ChangeType) + Send);
 #[macro_export]
 macro_rules! push_change {
     ($changes:expr) => {
