@@ -30,10 +30,15 @@ use tokio::{
     time::sleep,
 };
 
+/// You need to pass your minijinja env to form methods with your templates.
+/// You can use ```cargo run -p ryadno --bin make -- -f publish-templates``` to clone templates form crate to your project
 struct AppState {
     mjenv: Environment<'static>,
 }
 
+/// Ryadno designed to have state, so form should be somehow preserved between requests.
+/// Redis is a recommend way, but in this example, we're using a HashMap for simplicity.
+/// Rkyv is used to serialize form and store it in redis.
 static FORMS: OnceCell<Mutex<HashMap<String, (AlignedVec, i64)>>> = OnceCell::const_new();
 
 async fn get_froms() -> &'static Mutex<HashMap<String, (AlignedVec, i64)>> {
@@ -57,6 +62,7 @@ async fn store_form(form: Form<FieldTypes>) {
     lock.insert(form.form_ctx.uuid.clone(), (bytes, now));
 }
 
+/// You don't want to bloat your own server with forms, so make sure you cleans old forms.
 async fn forms_janitor() {
     let ttl = chrono::offset::Utc::now().timestamp() - 900;
     let forms = get_froms().await;
@@ -64,6 +70,8 @@ async fn forms_janitor() {
     lock.retain(|_, (_, timestamp)| *timestamp > ttl);
 }
 
+/// Rkyv unable to serialize closures, in order to react on form updates with some logic
+/// ryadno uses linkme slice, field accepts key of function to call, see example below
 #[distributed_slice(RYADNO_FIELDS_TEXTFIELD_HIDDEN_CLOUSRES)]
 #[linkme(crate = ryadno::linkme)]
 pub static HIDE_IF_FIRST_NAME_IS_EMPTY: (&'static str, TextFieldHiddenClosure) = (
@@ -134,6 +142,9 @@ async fn initial_form_render(State(state): State<Arc<AppState>>) -> axum::respon
     )
 }
 
+/// Form returns changes as Vec<FieldChange>, it describes what changed inside form,
+/// in this example changes converted into datastar sse events and then returned to the client
+/// Technically you can also utilize htmx for the same logic
 async fn handle_form_update(
     State(state): State<Arc<AppState>>,
     Json(update): Json<Update>,

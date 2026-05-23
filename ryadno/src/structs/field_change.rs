@@ -25,7 +25,7 @@ impl FieldChange {
                 match data {
                     Ok(d) | Err(d) => {
                         event = event.data(format!(
-                            concat!("selector {}\n", "mode inner\n", "elements {}"),
+                            concat!("selector {}\n", "mode replace\n", "elements {}"),
                             selector,
                             d.chars()
                                 .filter_map(|x| match x {
