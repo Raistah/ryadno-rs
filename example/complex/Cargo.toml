@@ -14,3 +14,4 @@ redis = { version = "1.0.5", features = ["tokio-comp"] }
 chrono = "0.4.44"
 futures-util = "0.3.32"
 async-stream = "0.3.6"
+tower-http = { version = "0.6.11", features = ["fs"] }

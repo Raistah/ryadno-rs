@@ -1,29 +1,41 @@
 {% extends "ryadno/fields/base.jinja" %}
 {% block field_body %}
-	{% if not hidden %}
-		<label>
-			<span class="block">{{label}}</span>
-			<input
-				type="{{input_type}}"
-				data-bind="{{uuid}}.value"
-				data-on:input__debounce.500ms="
-					@post(
-						`{{form_context.update_endpoint}}`,
-						{
-							headers: {{form_context.headers | replace('\"', '\'')}},
-							payload: {
-							    uuid: '{{form_context.uuid}}',
-								field_uuid: '{{uuid}}',
-								path: ${{uuid}}.path,
-								update: {
-								    Value: ${{uuid}}.value
-								},
-							}
-						}
-					)
-				"
-			/>
-			<span class="ryadno-field-error"></span>
-		</label>
-	{% endif %}
+    {% if not hidden %}
+        <label>
+            {% if not hide_label %}
+            <span class="block">{{label}}</span>
+            {% endif %}
+            <div class="border border-gray-400 rounded-md">
+                <input
+                    class="w-full px-2 py-1 rounded-md"
+                    type="{{input_type}}"
+                    data-bind="{{uuid}}.value"
+                    {% if placeholder %} placeholder="{{placeholder}}" {% endif %}
+                    {% if required %} required {% endif %}
+                    {% if autofocus %} autofocus {% endif %}
+                    {% if not disabled %}
+                    data-on:{{update_behavior}}="
+                        @post(
+                            `{{form_context.update_endpoint}}`,
+                            {
+                                headers: {{form_context.headers | replace('\"', '\'')}},
+                                payload: {
+                                    uuid: '{{form_context.uuid}}',
+                                    field_uuid: '{{uuid}}',
+                                    path: ${{uuid}}.path,
+                                    update: {
+                                        Value: ${{uuid}}.value
+                                    },
+                                }
+                            }
+                        )
+                    "
+                    {% else %}
+                    disabled
+                    {% endif %}
+                />
+            </div>
+            <span class="ryadno-field-error"></span>
+        </label>
+    {% endif %}
 {% endblock %}

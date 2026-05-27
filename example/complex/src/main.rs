@@ -15,7 +15,7 @@ use minijinja::{Environment, context, path_loader};
 use ryadno::{
     async_closure,
     fields::{
-        BoolValue, FieldTypes, LiveType, text_input::{RYADNO_FIELDS_TEXTFIELD_HIDDEN_CLOUSRES, TextField, TextFieldHiddenClosure}
+        BoolValue, FieldTypes, LiveType, text_input::{RYADNO_FIELDS_TEXTFIELD_BOOL_CLOUSRES, TextField, TextFieldHiddenClosure}
     },
     form::{Form, FormContext, Update},
     from_bytes,
@@ -29,6 +29,7 @@ use tokio::{
     sync::{Mutex, OnceCell},
     time::sleep,
 };
+use tower_http::services::ServeDir;
 
 /// You need to pass your minijinja env to form methods with your templates.
 /// You can use ```cargo run -p ryadno --bin make -- -f publish-templates``` to clone templates form crate to your project
@@ -72,7 +73,7 @@ async fn forms_janitor() {
 
 /// Rkyv unable to serialize closures, in order to react on form updates with some logic
 /// ryadno uses linkme slice, field accepts key of function to call, see example below
-#[distributed_slice(RYADNO_FIELDS_TEXTFIELD_HIDDEN_CLOUSRES)]
+#[distributed_slice(RYADNO_FIELDS_TEXTFIELD_BOOL_CLOUSRES)]
 #[linkme(crate = ryadno::linkme)]
 pub static HIDE_IF_FIRST_NAME_IS_EMPTY: (&'static str, TextFieldHiddenClosure) = (
     "HIDE_IF_FIRST_NAME_IS_EMPTY",
@@ -102,6 +103,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let app = Router::new()
         .route("/", get(initial_form_render).post(handle_form_update))
+        .nest_service("/public", ServeDir::new("public"))
         .with_state(Arc::new(state));
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
@@ -113,10 +115,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
 async fn initial_form_render(State(state): State<Arc<AppState>>) -> axum::response::Html<String> {
     let mut form: Form<FieldTypes> = Form::new(
         vec![
-            TextField::make("first_name".into()).into(),
+            TextField::make("first_name".into())
+                .placeholder("Oleksandr".into())
+                .required(BoolValue::Static(true))
+                .autofocus(BoolValue::Static(true))
+                .debounce(Duration::from_millis(300).into())
+                .column_span(2)
+                .into(),
             TextField::make("last_name".into())
                 .hidden(BoolValue::Closure(HIDE_IF_FIRST_NAME_IS_EMPTY.0.into()))
                 .live(LiveType::Conditinal(vec![FieldDep::from("first_name")]))
+                .into(),
+            TextField::make("address".into())
+                .placeholder("Kyiv, Ukraine".into())
+                .disabled(BoolValue::Static(true))
                 .into(),
         ],
         Arc::new(FormContext::new(
@@ -125,7 +137,7 @@ async fn initial_form_render(State(state): State<Arc<AppState>>) -> axum::respon
             HashMap::new(),
         )),
         None,
-    );
+    ).columns(2);
 
     let html = form.to_html_no_ctx(&state.mjenv).await.unwrap();
     store_form(form).await;

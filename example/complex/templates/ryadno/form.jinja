@@ -1,4 +1,9 @@
-<form class="ryadno-form-{{ uuid }}">
-	{{ html }}
-	<button>Submin</button>
+<form class="ryadno-form-{{ uuid }} grid grid-cols-{{columns}} gap-x-2 gap-y-4">
+    {{ html }}
+
+    <div class="flex gap-x-2 gap-y-4 col-span-full">
+        <button class="px-4 py-1 rounded-md font-semibold bg-olive-600 text-olive-100 cursor-pointer">
+            Submit
+        </button>
+    </div>
 </form>

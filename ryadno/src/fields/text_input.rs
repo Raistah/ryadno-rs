@@ -3,6 +3,7 @@ use std::{any::Any, fmt::Display, pin::Pin, sync::Arc};
 use linkme::distributed_slice;
 use minijinja::context;
 use rkyv::Archive;
+use serde_json::Value;
 use uuid::Uuid;
 
 use crate::{
@@ -11,13 +12,18 @@ use crate::{
         ChangePusher, FormContext, RenderRegistryPusher, Update, UpdateType, ValueGetter,
         ValueSetter,
     },
-    structs::{data_path::DataPath, error::Error, field_change},
+    structs::{
+        data_path::DataPath,
+        error::Error,
+        field_change,
+        update_event::{Debounce, Throttle, UpdateBehavior, UpdateEvent},
+    },
     utils::capitalize_first,
 };
 
 #[distributed_slice]
 #[linkme(crate = crate::linkme)]
-pub static RYADNO_FIELDS_TEXTFIELD_HIDDEN_CLOUSRES: [(&'static str, TextFieldHiddenClosure)];
+pub static RYADNO_FIELDS_TEXTFIELD_BOOL_CLOUSRES: [(&'static str, TextFieldHiddenClosure)];
 pub type TextFieldHiddenClosure = for<'a> fn(
     data_path: Arc<DataPath>,
     form_context: Arc<FormContext>,
@@ -31,31 +37,68 @@ pub struct TextField {
     uuid: String,
     name: String,
     data_path: Arc<DataPath>,
+    live: LiveType, // add some params for update call(on event, debounce)
+    update_behavior: UpdateBehavior,
     label: String,
-    live: LiveType,
+    hide_label: bool,
+    placeholder: Option<String>,
     hidden: BoolValue,
     is_hidden: bool,
     input_type: TextFieldType,
+    default_value: Option<String>,
+    disabled: BoolValue,
+    is_disabled: bool,
+    required: BoolValue,
+    is_required: bool,
+    autofocus: BoolValue,
+    is_autofocus: bool,
+    column_span: u8,
 }
 
 impl TextField {
     pub fn make(name: String) -> Self {
-        let label = capitalize_first(name.as_str());
+        let label = capitalize_first(name.as_str()).replace("_", " ");
 
         Self {
             uuid: Uuid::new_v4().to_string(),
             name: name.clone(),
             data_path: Arc::new(DataPath::from(name)),
-            label,
             live: LiveType::Static(false),
+            update_behavior: UpdateBehavior::default_with_event(UpdateEvent::Input),
+            label,
+            hide_label: false,
+            placeholder: None,
             hidden: BoolValue::Static(false),
             is_hidden: false,
             input_type: TextFieldType::Text,
+            default_value: None,
+            disabled: BoolValue::Static(false),
+            is_disabled: false,
+            required: BoolValue::Static(false),
+            is_required: false,
+            autofocus: BoolValue::Static(false),
+            is_autofocus: false,
+            column_span: 1,
         }
     }
 
     pub fn live(mut self, live_type: LiveType) -> Self {
         self.live = live_type;
+        self
+    }
+
+    pub fn update_event(mut self, value: UpdateEvent) -> Self {
+        self.update_behavior.event = value;
+        self
+    }
+
+    pub fn debounce(mut self, value: Debounce) -> Self {
+        self.update_behavior.debounce = Some(value);
+        self
+    }
+
+    pub fn throttle(mut self, value: Throttle) -> Self {
+        self.update_behavior.throttle = Some(value);
         self
     }
 
@@ -68,8 +111,8 @@ impl TextField {
         }
     }
 
-    pub fn hidden(mut self, hidden: BoolValue) -> Self {
-        self.hidden = hidden;
+    pub fn hidden(mut self, value: BoolValue) -> Self {
+        self.hidden = value;
         self
     }
 
@@ -83,7 +126,7 @@ impl TextField {
         match &self.hidden {
             BoolValue::Static(v) => v.clone(),
             BoolValue::Closure(handler) => {
-                match RYADNO_FIELDS_TEXTFIELD_HIDDEN_CLOUSRES
+                match RYADNO_FIELDS_TEXTFIELD_BOOL_CLOUSRES
                     .iter()
                     .find(|closure| closure.0 == handler.as_str())
                 {
@@ -125,6 +168,117 @@ impl TextField {
         self.input_type = TextFieldType::Url;
         self
     }
+
+    pub fn label(mut self, value: String) -> Self {
+        self.label = value;
+        self
+    }
+
+    pub fn hide_label(mut self) -> Self {
+        self.hide_label = true;
+        self
+    }
+
+    pub fn placeholder(mut self, value: String) -> Self {
+        self.placeholder = Some(value);
+        self
+    }
+
+    /// Default value assigns during initial_hydration.
+    /// If the value of a field depends on the value of another field, it is possible that the target field has not yet been assigned its default value.
+    pub fn default_value(mut self, value: String) -> Self {
+        self.default_value = Some(value);
+        self
+    }
+
+    pub fn disabled(mut self, value: BoolValue) -> Self {
+        self.disabled = value;
+        self
+    }
+
+    pub async fn is_disabled<'a>(
+        &mut self,
+        form_context: Arc<FormContext>,
+        runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
+        get: ValueGetter<'a>,
+        set: ValueSetter<'a>,
+    ) -> bool {
+        match &self.disabled {
+            BoolValue::Static(v) => v.clone(),
+            BoolValue::Closure(handler) => {
+                match RYADNO_FIELDS_TEXTFIELD_BOOL_CLOUSRES
+                    .iter()
+                    .find(|closure| closure.0 == handler.as_str())
+                {
+                    Some(closure) => {
+                        (closure.1)(self.get_data_path(), form_context, runtime_ctx, get, set).await
+                    }
+                    None => false,
+                }
+            }
+        }
+    }
+
+    pub fn required(mut self, value: BoolValue) -> Self {
+        self.required = value;
+        self
+    }
+
+    pub async fn is_required<'a>(
+        &mut self,
+        form_context: Arc<FormContext>,
+        runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
+        get: ValueGetter<'a>,
+        set: ValueSetter<'a>,
+    ) -> bool {
+        match &self.required {
+            BoolValue::Static(v) => v.clone(),
+            BoolValue::Closure(handler) => {
+                match RYADNO_FIELDS_TEXTFIELD_BOOL_CLOUSRES
+                    .iter()
+                    .find(|closure| closure.0 == handler.as_str())
+                {
+                    Some(closure) => {
+                        (closure.1)(self.get_data_path(), form_context, runtime_ctx, get, set).await
+                    }
+                    None => false,
+                }
+            }
+        }
+    }
+
+    pub fn autofocus(mut self, value: BoolValue) -> Self {
+        self.autofocus = value;
+        self
+    }
+
+    pub async fn is_autofocus<'a>(
+        &mut self,
+        form_context: Arc<FormContext>,
+        runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
+        get: ValueGetter<'a>,
+        set: ValueSetter<'a>,
+    ) -> bool {
+        match &self.autofocus {
+            BoolValue::Static(v) => v.clone(),
+            BoolValue::Closure(handler) => {
+                match RYADNO_FIELDS_TEXTFIELD_BOOL_CLOUSRES
+                    .iter()
+                    .find(|closure| closure.0 == handler.as_str())
+                {
+                    Some(closure) => {
+                        (closure.1)(self.get_data_path(), form_context, runtime_ctx, get, set).await
+                    }
+                    None => false,
+                }
+            }
+        }
+    }
+
+    pub fn column_span(mut self, value: u8) -> Self {
+        self.column_span = value;
+        self
+    }
 }
 
 #[async_trait::async_trait]
@@ -144,8 +298,42 @@ impl Field for TextField {
         get: ValueGetter<'a>,
         set: ValueSetter<'a>,
     ) {
+        if let Some(default_value) = &self.default_value
+            && get(self.get_data_path()).await == None
+        {
+            set(self.get_data_path(), Value::String(default_value.clone())).await;
+            self.default_value = None;
+        }
+
         self.is_hidden = self
-            .is_hidden(form_context, runtime_ctx.clone(), get.clone(), set.clone())
+            .is_hidden(
+                form_context.clone(),
+                runtime_ctx.clone(),
+                get.clone(),
+                set.clone(),
+            )
+            .await;
+
+        self.is_disabled = self
+            .is_disabled(
+                form_context.clone(),
+                runtime_ctx.clone(),
+                get.clone(),
+                set.clone(),
+            )
+            .await;
+
+        self.is_required = self
+            .is_required(
+                form_context.clone(),
+                runtime_ctx.clone(),
+                get.clone(),
+                set.clone(),
+            )
+            .await;
+
+        self.is_autofocus = self
+            .is_autofocus(form_context, runtime_ctx.clone(), get.clone(), set.clone())
             .await;
     }
 
@@ -178,9 +366,45 @@ impl Field for TextField {
         push: RenderRegistryPusher<'a>,
     ) {
         let new_is_hidden = self
-            .is_hidden(form_context, runtime_ctx.clone(), get.clone(), set.clone())
+            .is_hidden(
+                form_context.clone(),
+                runtime_ctx.clone(),
+                get.clone(),
+                set.clone(),
+            )
             .await;
         if Self::update_field(&mut self.is_hidden, new_is_hidden) {
+            push(self.get_data_path()).await;
+        }
+
+        let new_is_disabled = self
+            .is_disabled(
+                form_context.clone(),
+                runtime_ctx.clone(),
+                get.clone(),
+                set.clone(),
+            )
+            .await;
+        if Self::update_field(&mut self.is_disabled, new_is_disabled) {
+            push(self.get_data_path()).await;
+        }
+
+        let new_is_required = self
+            .is_required(
+                form_context.clone(),
+                runtime_ctx.clone(),
+                get.clone(),
+                set.clone(),
+            )
+            .await;
+        if Self::update_field(&mut self.is_required, new_is_required) {
+            push(self.get_data_path()).await;
+        }
+
+        let new_is_autofocus = self
+            .is_autofocus(form_context, runtime_ctx.clone(), get.clone(), set.clone())
+            .await;
+        if Self::update_field(&mut self.is_autofocus, new_is_autofocus) {
             push(self.get_data_path()).await;
         }
     }
@@ -200,13 +424,21 @@ impl Field for TextField {
             .get_template("ryadno/fields/text-input.jinja")?
             .render(context! {
                 uuid => self.uuid,
-                label => self.label,
                 name => self.name,
-                state_path => self.data_path.to_string(),
-                hidden => self.is_hidden,
-                input_type => self.input_type.to_string(),
                 value => value,
-                form_context => form_context
+                form_context => form_context,
+
+                autofocus => self.is_autofocus,
+                column_span => self.get_column_span(),
+                disabled => self.is_disabled,
+                hidden => self.is_hidden,
+                hide_label => self.hide_label,
+                input_type => self.input_type.to_string(),
+                label => self.label,
+                placeholder => self.placeholder,
+                required => self.is_required,
+                state_path => self.data_path.to_string(),
+                update_behavior => self.update_behavior.to_string(),
             })?)
     }
 
@@ -249,6 +481,10 @@ impl Field for TextField {
 
     fn get_uuid(&self) -> &str {
         &self.uuid
+    }
+
+    fn get_column_span(&self) -> u8 {
+        self.column_span
     }
 }
 

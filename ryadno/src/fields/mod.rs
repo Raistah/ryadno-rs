@@ -74,6 +74,7 @@ pub trait Field: Archive + Debug + Eq + PartialEq {
     fn get_name(&self) -> &str;
     fn get_uuid(&self) -> &str;
     fn is_live(&self) -> &LiveType;
+    fn get_column_span(&self) -> u8;
 }
 
 pub fn prepare_value_for_datastar(value: &Value) -> String {
@@ -206,6 +207,12 @@ macro_rules! register_field_type_enum {
             fn get_uuid(&self) -> &str {
                 match self {
                     $(Self::$variant(v) => v.get_uuid()),*
+                }
+            }
+
+            fn get_column_span(&self) -> u8 {
+                match self {
+                    $(Self::$variant(v) => v.get_column_span()),*
                 }
             }
         }

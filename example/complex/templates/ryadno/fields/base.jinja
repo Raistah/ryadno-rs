@@ -1,5 +1,5 @@
 <div
-	class="ryadno-field-{{ uuid }}"
+	class="ryadno-field-{{ uuid }} col-span-{{column_span}}{% if hidden %} hidden{%endif%}{% if disabled %} opacity-50 pointer-events-none{% endif %}"
 	data-signals="{
 		'{{uuid}}': {
 			value: {{value}},

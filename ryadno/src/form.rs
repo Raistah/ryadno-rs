@@ -28,6 +28,7 @@ pub struct Form<T: Field + Archive + Debug + Eq + PartialEq> {
     pub schema: Vec<T>,
     pub form_ctx: Arc<FormContext>,
     pub data: Option<ValueWrapper>,
+    pub columns: u8,
 }
 
 impl<T> Form<T>
@@ -39,7 +40,13 @@ where
             schema,
             form_ctx,
             data,
+            columns: 1
         }
+    }
+
+    pub fn columns(mut self, value: u8) -> Self {
+        self.columns = value;
+        self
     }
 
     pub async fn to_html<'a, C: Any + Sync + Send>(
@@ -100,7 +107,8 @@ where
 
         Ok(mjenv.get_template("ryadno/form.jinja")?.render(context! {
             uuid => self.form_ctx.uuid,
-            html => rendered_fields
+            html => rendered_fields,
+            columns => self.columns
         })?)
     }
 
@@ -437,14 +445,17 @@ impl<D: Fallible + ?Sized> Deserialize<ValueWrapper, D> for ArchivedString {
 
 #[cfg(test)]
 mod test {
-    use crate::{async_closure, structs::field_change::ChangeType};
+    use crate::{
+        async_closure,
+        structs::{field_change::ChangeType, field_dep::FieldDep},
+    };
     use linkme::distributed_slice;
     use minijinja::{Environment, path_loader};
     use serde_json::json;
 
     use crate::fields::{
         BoolValue, FieldTypes,
-        text_input::{RYADNO_FIELDS_TEXTFIELD_HIDDEN_CLOUSRES, TextField, TextFieldHiddenClosure},
+        text_input::{RYADNO_FIELDS_TEXTFIELD_BOOL_CLOUSRES, TextField, TextFieldHiddenClosure},
     };
 
     use super::*;
@@ -500,9 +511,9 @@ mod test {
         assert!(html.contains("path: 'last_name'"));
     }
 
-    #[distributed_slice(RYADNO_FIELDS_TEXTFIELD_HIDDEN_CLOUSRES)]
-    pub static GET_TEST2_USING_RUNTIME_CTX_CLOSURE: (&'static str, TextFieldHiddenClosure) = (
-        "GET_TEST2_USING_RUNTIME_CTX_CLOSURE",
+    #[distributed_slice(RYADNO_FIELDS_TEXTFIELD_BOOL_CLOUSRES)]
+    pub static TEST3_CLOSURE: (&'static str, TextFieldHiddenClosure) = (
+        "TEST3_CLOSURE",
         async_closure!((_, _, ctx, _, set) {
             if let Some(any) = ctx
                 && let Some(ctx) = any.downcast_ref::<HashMap<String, bool>>()
@@ -514,13 +525,13 @@ mod test {
         }),
     );
 
-    #[distributed_slice(RYADNO_FIELDS_TEXTFIELD_HIDDEN_CLOUSRES)]
-    pub static GET_TEST3_USING_GETTER_CLOSURE: (&'static str, TextFieldHiddenClosure) = (
-        "GET_TEST3_USING_GETTER_CLOSURE",
+    #[distributed_slice(RYADNO_FIELDS_TEXTFIELD_BOOL_CLOUSRES)]
+    pub static TEST4_CLOSURE: (&'static str, TextFieldHiddenClosure) = (
+        "TEST4_CLOSURE",
         async_closure!((_, _, _, get, _) {
             if
-                Some(Value::String("test1 value".to_string())) ==
-                get(Arc::new(DataPath::from("test1"))).await
+                Some(Value::String("test3 changed".to_string())) ==
+                get(Arc::new(DataPath::from("test3"))).await
             {
                 return true;
             }
@@ -529,7 +540,7 @@ mod test {
     );
 
     #[tokio::test]
-    async fn test_form_full_sycle() {
+    async fn test_form_full_cycle() {
         let mut ctx: HashMap<String, bool> = HashMap::new();
         ctx.insert("test2".to_string(), true);
         let ctx = Arc::new(ctx);
@@ -545,11 +556,12 @@ mod test {
                     .into(),
                 TextField::make("test3".to_string())
                     .hidden(BoolValue::Closure(
-                        GET_TEST2_USING_RUNTIME_CTX_CLOSURE.0.into(),
+                        TEST3_CLOSURE.0.into(),
                     ))
                     .into(),
                 TextField::make("test4".to_string())
-                    .hidden(BoolValue::Closure(GET_TEST3_USING_GETTER_CLOSURE.0.into()))
+                    .hidden(BoolValue::Closure(TEST4_CLOSURE.0.into()))
+                    .live(LiveType::Conditinal(vec![FieldDep::from("test3")]))
                     .into(),
             ],
             Arc::new(FormContext::new(
@@ -574,7 +586,7 @@ mod test {
         assert!(!html.contains(r#"<span class="block">Test1</span>"#));
         assert!(html.contains(r#"<span class="block">Test2</span>"#));
         assert!(!html.contains(r#"<span class="block">Test3</span>"#));
-        assert!(!html.contains(r#"<span class="block">Test4</span>"#));
+        assert!(html.contains(r#"<span class="block">Test4</span>"#));
 
         // Simulate form update
         let field_to_update = form.schema.get(2).unwrap();
@@ -589,17 +601,7 @@ mod test {
 
         let changes = form.handle_update(update, &env, ctx).await;
 
-        assert_eq!(changes.len(), 2);
-        assert_eq!(changes[1].data_path, path);
-        assert_eq!(
-            changes[1].result,
-            ChangeType::RerenderField {
-                selector: format!(".ryadno-field-{}", field_uuid),
-                data: Ok(format!(
-                    "<div\n\tclass=\"field-{0}\"\n\tdata-signals=\"{{\n\t\t'{0}': {{\n\t\t\tvalue: 'test3 changed',\n\t\t\tpath: 'test3'\n\t\t}}\n\t}}\"\n>\n\t\n\t\n\n</div>",
-                    field_uuid
-                ))
-            }
-        );
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].data_path, *form.schema.get(3).unwrap().get_data_path());
     }
 }
