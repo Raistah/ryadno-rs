@@ -1,7 +1,7 @@
 {% extends "ryadno/fields/base.jinja" %}
 {% block field_body %}
     {% if not hidden %}
-        <div>
+        <div class="flex flex-col gap-1">
             {% if not hide_label %}
                 <div class="flex flex-col gap-2">
                     {% if above_label_content %}
@@ -19,7 +19,7 @@
                                 {{ before_label_content }}
                             </div>
                         {% endif %}
-                        <label for="field_{{uuid}}">
+                        <label for="field_{{uuid}}" class="font-semibold">
                             {{label}}
                         </label>
                         {% if after_label_content %}

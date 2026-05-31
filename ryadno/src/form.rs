@@ -583,10 +583,10 @@ mod test {
         });
 
         let html = form.to_html(&env, ctx.clone()).await.unwrap();
-        assert!(!html.contains(r#"<span class="block">Test1</span>"#));
-        assert!(html.contains(r#"<span class="block">Test2</span>"#));
-        assert!(!html.contains(r#"<span class="block">Test3</span>"#));
-        assert!(html.contains(r#"<span class="block">Test4</span>"#));
+        assert!(!html.contains(format!("field_{}", form.schema.get(0).unwrap().get_uuid()).as_str()));
+        assert!(html.contains(format!("field_{}", form.schema.get(1).unwrap().get_uuid()).as_str()));
+        assert!(!html.contains(format!("field_{}", form.schema.get(2).unwrap().get_uuid()).as_str()));
+        assert!(html.contains(format!("field_{}", form.schema.get(3).unwrap().get_uuid()).as_str()));
 
         // Simulate form update
         let field_to_update = form.schema.get(2).unwrap();
