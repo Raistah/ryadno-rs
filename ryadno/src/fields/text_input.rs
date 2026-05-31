@@ -16,6 +16,7 @@ use crate::{
         data_path::DataPath,
         error::Error,
         field_change,
+        form_content::FormContent,
         update_event::{Debounce, Throttle, UpdateBehavior, UpdateEvent},
     },
     utils::capitalize_first,
@@ -53,6 +54,25 @@ pub struct TextField {
     autofocus: BoolValue,
     is_autofocus: bool,
     column_span: u8,
+
+    above_label_content: FormContent,
+    above_label_content_cached: Option<String>,
+    before_label_content: FormContent,
+    before_label_content_cached: Option<String>,
+    after_label_content: FormContent,
+    after_label_content_cached: Option<String>,
+    below_label_content: FormContent,
+    below_label_content_cached: Option<String>,
+    before_input_content: FormContent,
+    before_input_content_cached: Option<String>,
+    after_input_content: FormContent,
+    after_input_content_cached: Option<String>,
+    above_error_content: FormContent,
+    above_error_content_cached: Option<String>,
+    below_error_content: FormContent,
+    below_error_content_cached: Option<String>,
+    below_content: FormContent,
+    below_content_cached: Option<String>,
 }
 
 impl TextField {
@@ -79,6 +99,25 @@ impl TextField {
             autofocus: BoolValue::Static(false),
             is_autofocus: false,
             column_span: 1,
+
+            above_label_content: FormContent::default(),
+            above_label_content_cached: None,
+            before_label_content: FormContent::default(),
+            before_label_content_cached: None,
+            after_label_content: FormContent::default(),
+            after_label_content_cached: None,
+            below_label_content: FormContent::default(),
+            below_label_content_cached: None,
+            before_input_content: FormContent::default(),
+            before_input_content_cached: None,
+            after_input_content: FormContent::default(),
+            after_input_content_cached: None,
+            above_error_content: FormContent::default(),
+            above_error_content_cached: None,
+            below_error_content: FormContent::default(),
+            below_error_content_cached: None,
+            below_content: FormContent::default(),
+            below_content_cached: None,
         }
     }
 
@@ -279,6 +318,51 @@ impl TextField {
         self.column_span = value;
         self
     }
+
+    pub fn above_label_content(mut self, value: FormContent) -> Self {
+        self.above_label_content = value;
+        self
+    }
+
+    pub fn before_label_content(mut self, value: FormContent) -> Self {
+        self.before_label_content = value;
+        self
+    }
+
+    pub fn after_label_content(mut self, value: FormContent) -> Self {
+        self.after_label_content = value;
+        self
+    }
+
+    pub fn below_label_content(mut self, value: FormContent) -> Self {
+        self.below_label_content = value;
+        self
+    }
+
+    pub fn before_input_content(mut self, value: FormContent) -> Self {
+        self.before_input_content = value;
+        self
+    }
+
+    pub fn after_input_content(mut self, value: FormContent) -> Self {
+        self.after_input_content = value;
+        self
+    }
+
+    pub fn above_error_content(mut self, value: FormContent) -> Self {
+        self.above_error_content = value;
+        self
+    }
+
+    pub fn below_error_content(mut self, value: FormContent) -> Self {
+        self.below_error_content = value;
+        self
+    }
+
+    pub fn below_content(mut self, value: FormContent) -> Self {
+        self.below_content = value;
+        self
+    }
 }
 
 #[async_trait::async_trait]
@@ -335,6 +419,16 @@ impl Field for TextField {
         self.is_autofocus = self
             .is_autofocus(form_context, runtime_ctx.clone(), get.clone(), set.clone())
             .await;
+
+        self.above_label_content_cached = self.above_label_content.to_html();
+        self.before_label_content_cached = self.before_label_content.to_html();
+        self.after_label_content_cached = self.after_label_content.to_html();
+        self.below_label_content_cached = self.below_label_content.to_html();
+        self.before_input_content_cached = self.before_input_content.to_html();
+        self.after_input_content_cached = self.after_input_content.to_html();
+        self.above_error_content_cached = self.above_error_content.to_html();
+        self.below_error_content_cached = self.below_error_content.to_html();
+        self.below_content_cached = self.below_content.to_html();
     }
 
     async fn process_update<'a>(
@@ -439,6 +533,25 @@ impl Field for TextField {
                 required => self.is_required,
                 state_path => self.data_path.to_string(),
                 update_behavior => self.update_behavior.to_string(),
+
+                above_label_content => self.above_label_content_cached,
+                above_label_content_align => self.above_label_content.align,
+                before_label_content => self.before_label_content_cached,
+                before_label_content_align => self.before_label_content.align,
+                after_label_content => self.after_label_content_cached,
+                after_label_content_align => self.after_label_content.align,
+                below_label_content => self.below_label_content_cached,
+                below_label_content_align => self.below_label_content.align,
+                before_input_content => self.before_input_content_cached,
+                before_input_content_align => self.before_input_content.align,
+                after_input_content => self.after_input_content_cached,
+                after_input_content_align => self.after_input_content.align,
+                above_error_content => self.above_error_content_cached,
+                above_error_content_align => self.above_error_content.align,
+                below_error_content => self.below_error_content_cached,
+                below_error_content_align => self.below_error_content.align,
+                below_content => self.below_content_cached,
+                below_content_align => self.below_content.align,
             })?)
     }
 

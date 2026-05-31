@@ -21,7 +21,7 @@ use ryadno::{
     from_bytes,
     linkme::distributed_slice,
     rkyv::util::AlignedVec,
-    structs::{data_path::DataPath, field_dep::FieldDep},
+    structs::{data_path::DataPath, field_dep::FieldDep, form_content::FormContent},
     to_bytes,
 };
 use serde_json::Value;
@@ -121,6 +121,15 @@ async fn initial_form_render(State(state): State<Arc<AppState>>) -> axum::respon
                 .autofocus(BoolValue::Static(true))
                 .debounce(Duration::from_millis(300).into())
                 .column_span(2)
+                .above_label_content(vec!["above".into()].into())
+                .before_label_content(vec!["before".into()].into())
+                .after_label_content(vec!["after".into()].into())
+                .below_label_content(vec!["below".into()].into())
+                .before_input_content(vec!["before".into()].into())
+                .after_input_content(vec!["after".into()].into())
+                .above_error_content(vec!["above".into()].into())
+                .below_error_content(vec!["below".into()].into())
+                .below_content(vec!["below".into()].into())
                 .into(),
             TextField::make("last_name".into())
                 .hidden(BoolValue::Closure(HIDE_IF_FIRST_NAME_IS_EMPTY.0.into()))

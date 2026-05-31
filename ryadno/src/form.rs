@@ -447,7 +447,7 @@ impl<D: Fallible + ?Sized> Deserialize<ValueWrapper, D> for ArchivedString {
 mod test {
     use crate::{
         async_closure,
-        structs::{field_change::ChangeType, field_dep::FieldDep},
+        structs::field_dep::FieldDep,
     };
     use linkme::distributed_slice;
     use minijinja::{Environment, path_loader};

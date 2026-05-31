@@ -1,41 +1,99 @@
 {% extends "ryadno/fields/base.jinja" %}
 {% block field_body %}
     {% if not hidden %}
-        <label>
+        <div>
             {% if not hide_label %}
-            <span class="block">{{label}}</span>
-            {% endif %}
-            <div class="border border-gray-400 rounded-md">
-                <input
-                    class="w-full px-2 py-1 rounded-md"
-                    type="{{input_type}}"
-                    data-bind="{{uuid}}.value"
-                    {% if placeholder %} placeholder="{{placeholder}}" {% endif %}
-                    {% if required %} required {% endif %}
-                    {% if autofocus %} autofocus {% endif %}
-                    {% if not disabled %}
-                    data-on:{{update_behavior}}="
-                        @post(
-                            `{{form_context.update_endpoint}}`,
-                            {
-                                headers: {{form_context.headers | replace('\"', '\'')}},
-                                payload: {
-                                    uuid: '{{form_context.uuid}}',
-                                    field_uuid: '{{uuid}}',
-                                    path: ${{uuid}}.path,
-                                    update: {
-                                        Value: ${{uuid}}.value
-                                    },
-                                }
-                            }
-                        )
-                    "
-                    {% else %}
-                    disabled
+                <div class="flex flex-col gap-2">
+                    {% if above_label_content %}
+                        <div
+                            class="flex {% if above_label_content_align == "Center" %}justify-center{% elif above_label_content_align == "End" %}justify-end{% endif %}"
+                        >
+                            {{ above_label_content }}
+                        </div>
                     {% endif %}
-                />
+                    <div class="flex gap-2">
+                        {% if before_label_content %}
+                            <div
+                                class="flex {% if before_label_content_align == "Center" %}justify-center{% elif before_label_content_align == "End" %}justify-end{% endif %}"
+                            >
+                                {{ before_label_content }}
+                            </div>
+                        {% endif %}
+                        <label for="field_{{uuid}}">
+                            {{label}}
+                        </label>
+                        {% if after_label_content %}
+                            <div
+                                class="flex flex-1 {% if after_label_content_align == "Center" %}justify-center{% elif after_label_content_align == "End" %}justify-end{% endif %}"
+                            >
+                                {{ after_label_content }}
+                            </div>
+                        {% endif %}
+                    </div>
+                    {% if below_label_content %}
+                        <div
+                            class="flex {% if below_label_content_align == "Center" %}justify-center{% elif below_label_content_align == "End" %}justify-end{% endif %}"
+                        >
+                            {{ below_label_content }}
+                        </div>
+                    {% endif %}
+                </div>
+            {% endif %}
+            <div class="flex gap-2">
+                {% if before_input_content %}
+                    <div
+                        class="flex {% if before_input_content_align == "Center" %}justify-center{% elif before_input_content_align == "End" %}justify-end{% endif %}"
+                    >
+                        {{ before_input_content }}
+                    </div>
+                {% endif %}
+                <div class="border border-gray-400 rounded-md">
+                    <input
+                        id="field_{{uuid}}"
+                        class="w-full px-2 py-1 rounded-md"
+                        type="{{input_type}}"
+                        data-bind="{{uuid}}.value"
+                        {% if placeholder %} placeholder="{{placeholder}}" {% endif %}
+                        {% if required %} required {% endif %}
+                        {% if autofocus %} autofocus {% endif %}
+                        {% if not disabled %}
+                        data-on:{{update_behavior}}="
+                            @post(
+                                `{{form_context.update_endpoint}}`,
+                                {
+                                    headers: {{form_context.headers | replace('\"', '\'')}},
+                                    payload: {
+                                        uuid: '{{form_context.uuid}}',
+                                        field_uuid: '{{uuid}}',
+                                        path: ${{uuid}}.path,
+                                        update: {
+                                            Value: ${{uuid}}.value
+                                        },
+                                    }
+                                }
+                            )
+                        "
+                        {% else %}
+                        disabled
+                        {% endif %}
+                    />
+                </div>
+                {% if after_input_content %}
+                    <div
+                        class="flex {% if after_input_content_align == "Center" %}justify-center{% elif after_input_content_align == "End" %}justify-end{% endif %}"
+                    >
+                        {{ after_input_content }}
+                    </div>
+                {% endif %}
             </div>
-            <span class="ryadno-field-error"></span>
-        </label>
+            <div class="ryadno-field-error empty:hidden"></div>
+            {% if below_content %}
+                <div
+                    class="flex {% if below_content_align == "Center" %}justify-center{% elif below_content_align == "End" %}justify-end{% endif %}"
+                >
+                    {{ below_content }}
+                </div>
+            {% endif %}
+        </div>
     {% endif %}
 {% endblock %}
