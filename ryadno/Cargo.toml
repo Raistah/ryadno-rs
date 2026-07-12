@@ -30,3 +30,5 @@ uuid = { version = "1.22.0", features = ["v4"] }
 validator = { version = "0.20.0", features = ["derive"] }
 tokio = { version = "1.52.1", features = ["macros", "test-util", "rt-multi-thread"] }
 async-trait = "0.1.89"
+chrono = { version = "0.4.45", features = ["alloc", "rkyv-64"] }
+regex = "1.13.0"

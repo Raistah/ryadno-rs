@@ -2,12 +2,7 @@ use std::{any::Any, collections::HashMap, fmt::Debug, ops::DerefMut, sync::Arc};
 
 use futures::{FutureExt, future::BoxFuture};
 use minijinja::context;
-use rkyv::{
-    Archive, Deserialize, Serialize,
-    rancor::{Fallible, Source},
-    ser::{Allocator, Writer},
-    string::{ArchivedString, StringResolver},
-};
+use rkyv::{Archive, Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -19,6 +14,7 @@ use crate::{
         data_path::DataPath,
         error::Error,
         field_change::{self, FieldChange},
+        rkyv::value_wrapper::ValueWrapper,
     },
     value_getter, value_setter,
 };
@@ -40,7 +36,7 @@ where
             schema,
             form_ctx,
             data,
-            columns: 1
+            columns: 1,
         }
     }
 
@@ -412,43 +408,9 @@ pub enum UpdateType {
     Action(Value),
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub struct ValueWrapper(pub Value);
-
-impl Archive for ValueWrapper {
-    type Archived = ArchivedString;
-    type Resolver = StringResolver;
-
-    fn resolve(&self, resolver: Self::Resolver, out: rkyv::Place<Self::Archived>) {
-        let s = self.0.to_string();
-        ArchivedString::resolve_from_str(&s, resolver, out);
-    }
-}
-
-impl<S> Serialize<S> for ValueWrapper
-where
-    S: Fallible + Allocator + Writer + ?Sized,
-    S::Error: Source,
-{
-    fn serialize(&self, serializer: &mut S) -> Result<Self::Resolver, S::Error> {
-        Self::Archived::serialize_from_str::<_>(self.0.to_string().as_str(), serializer)
-    }
-}
-
-impl<D: Fallible + ?Sized> Deserialize<ValueWrapper, D> for ArchivedString {
-    fn deserialize(&self, _: &mut D) -> Result<ValueWrapper, D::Error> {
-        let string = self.to_string();
-        let value: serde_json::Value = serde_json::from_str(string.as_str()).unwrap();
-        Ok(ValueWrapper(value))
-    }
-}
-
 #[cfg(test)]
 mod test {
-    use crate::{
-        async_closure,
-        structs::field_dep::FieldDep,
-    };
+    use crate::{async_closure, structs::field_dep::FieldDep};
     use linkme::distributed_slice;
     use minijinja::{Environment, path_loader};
     use serde_json::json;
@@ -555,9 +517,7 @@ mod test {
                     .hidden(BoolValue::Closure("this_closure_not_exists".into()))
                     .into(),
                 TextField::make("test3".to_string())
-                    .hidden(BoolValue::Closure(
-                        TEST3_CLOSURE.0.into(),
-                    ))
+                    .hidden(BoolValue::Closure(TEST3_CLOSURE.0.into()))
                     .into(),
                 TextField::make("test4".to_string())
                     .hidden(BoolValue::Closure(TEST4_CLOSURE.0.into()))
@@ -583,10 +543,18 @@ mod test {
         });
 
         let html = form.to_html(&env, ctx.clone()).await.unwrap();
-        assert!(!html.contains(format!("field_{}", form.schema.get(0).unwrap().get_uuid()).as_str()));
-        assert!(html.contains(format!("field_{}", form.schema.get(1).unwrap().get_uuid()).as_str()));
-        assert!(!html.contains(format!("field_{}", form.schema.get(2).unwrap().get_uuid()).as_str()));
-        assert!(html.contains(format!("field_{}", form.schema.get(3).unwrap().get_uuid()).as_str()));
+        assert!(
+            !html.contains(format!("field_{}", form.schema.get(0).unwrap().get_uuid()).as_str())
+        );
+        assert!(
+            html.contains(format!("field_{}", form.schema.get(1).unwrap().get_uuid()).as_str())
+        );
+        assert!(
+            !html.contains(format!("field_{}", form.schema.get(2).unwrap().get_uuid()).as_str())
+        );
+        assert!(
+            html.contains(format!("field_{}", form.schema.get(3).unwrap().get_uuid()).as_str())
+        );
 
         // Simulate form update
         let field_to_update = form.schema.get(2).unwrap();
@@ -602,6 +570,9 @@ mod test {
         let changes = form.handle_update(update, &env, ctx).await;
 
         assert_eq!(changes.len(), 1);
-        assert_eq!(changes[0].data_path, *form.schema.get(3).unwrap().get_data_path());
+        assert_eq!(
+            changes[0].data_path,
+            *form.schema.get(3).unwrap().get_data_path()
+        );
     }
 }

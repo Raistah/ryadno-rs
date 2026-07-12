@@ -12,7 +12,7 @@ use serde_json::Value;
 use crate::{
     fields::text_input::TextField,
     form::{ChangePusher, FormContext, RenderRegistryPusher, Update, ValueGetter, ValueSetter},
-    structs::{data_path::DataPath, error::Error, field_dep::FieldDep},
+    structs::{data_path::DataPath, error::Error, field_dep::FieldDep, validation::ValidationRule},
 };
 
 #[async_trait::async_trait]
@@ -70,7 +70,14 @@ pub trait Field: Archive + Debug + Eq + PartialEq {
         push: ChangePusher,
     );
 
-    fn validate(&self, value: Value) -> Result<(), Vec<(String, String)>>;
+    async fn validate<'a>(
+        &self,
+        value: Option<&serde_json::Value>,
+        form_context: Arc<FormContext>,
+        runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
+        get: ValueGetter<'a>,
+        set: ValueSetter<'a>,
+    ) -> Result<(), Vec<ValidationRule>>;
     fn get_name(&self) -> &str;
     fn get_uuid(&self) -> &str;
     fn is_live(&self) -> &LiveType;
@@ -186,9 +193,22 @@ macro_rules! register_field_type_enum {
                 }
             }
 
-            fn validate(&self, value: $crate::serde_json::Value) -> Result<(), Vec<(String, String)>> {
+            async fn validate<'a>(
+                &self,
+                value: Option<&serde_json::Value>,
+                form_context: Arc<FormContext>,
+                runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
+                get: ValueGetter<'a>,
+                set: ValueSetter<'a>,
+            ) -> Result<(), Vec<ValidationRule>> {
                 match self {
-                    $(Self::$variant(v) => v.validate(value)),*
+                    $(Self::$variant(v) => v.validate(
+                        value,
+                        form_context,
+                        runtime_ctx,
+                        get,
+                        set,
+                    ).await),*
                 }
             }
 

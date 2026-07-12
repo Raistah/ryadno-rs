@@ -2,6 +2,7 @@ use std::{any::Any, fmt::Display, pin::Pin, sync::Arc};
 
 use linkme::distributed_slice;
 use minijinja::context;
+use regex::Regex;
 use rkyv::Archive;
 use serde_json::Value;
 use uuid::Uuid;
@@ -18,8 +19,12 @@ use crate::{
         field_change,
         form_content::FormContent,
         update_event::{Debounce, Throttle, UpdateBehavior, UpdateEvent},
+        validation::{ExpectedType, ValidationRule},
     },
-    utils::capitalize_first,
+    utils::{
+        capitalize_first, is_valid_email, is_valid_hex_color, is_valid_ip, is_valid_mac_address,
+        is_valid_ulid, is_valid_url, is_valid_uuid, json::is_valid_json,
+    },
 };
 
 #[distributed_slice]
@@ -54,6 +59,7 @@ pub struct TextField {
     autofocus: BoolValue,
     is_autofocus: bool,
     column_span: u8,
+    validation_rules: Option<Vec<ValidationRule>>,
 
     above_label_content: FormContent,
     above_label_content_cached: Option<String>,
@@ -99,6 +105,7 @@ impl TextField {
             autofocus: BoolValue::Static(false),
             is_autofocus: false,
             column_span: 1,
+            validation_rules: None,
 
             above_label_content: FormContent::default(),
             above_label_content_cached: None,
@@ -580,8 +587,338 @@ impl Field for TextField {
         )
     }
 
-    fn validate(&self, value: serde_json::Value) -> Result<(), Vec<(String, String)>> {
-        Ok(())
+    async fn validate<'a>(
+        &self,
+        value: Option<&serde_json::Value>,
+        form_context: Arc<FormContext>,
+        runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
+        get: ValueGetter<'a>,
+        set: ValueSetter<'a>,
+    ) -> Result<(), Vec<ValidationRule>> {
+        match &self.validation_rules {
+            Some(validation_rules) => {
+                let mut errors: Vec<ValidationRule> = Vec::new();
+
+                for validation_rule in validation_rules.iter() {
+                    match validation_rule {
+                        ValidationRule::Required => {
+                            if value.is_none() {
+                                errors.push(validation_rule.clone())
+                            }
+                        }
+                        ValidationRule::Is(expected_type) => match (expected_type, value) {
+                            (ExpectedType::Null, Some(Value::Null))
+                            | (ExpectedType::Bool, Some(Value::Bool(_)))
+                            | (ExpectedType::Number, Some(Value::Number(_)))
+                            | (ExpectedType::String, Some(Value::String(_)))
+                            | (ExpectedType::Array, Some(Value::Array(_)))
+                            | (ExpectedType::Object, Some(Value::Object(_))) => {
+                                continue;
+                            }
+                            _ => errors.push(validation_rule.clone()),
+                        },
+                        ValidationRule::Same(data_path) => {
+                            let other_value = get(data_path.clone()).await;
+                            match (value, other_value) {
+                                (None, None) | (Some(Value::Null), Some(Value::Null)) => {
+                                    continue;
+                                }
+                                (Some(Value::Object(a)), Some(Value::Object(b))) => {
+                                    if a != &b {
+                                        errors.push(validation_rule.clone())
+                                    }
+                                }
+                                (Some(Value::Bool(a)), Some(Value::Bool(b))) => {
+                                    if a != &b {
+                                        errors.push(validation_rule.clone())
+                                    }
+                                }
+                                (Some(Value::Number(a)), Some(Value::Number(b))) => {
+                                    if a != &b {
+                                        errors.push(validation_rule.clone())
+                                    }
+                                }
+                                (Some(Value::String(a)), Some(Value::String(b))) => {
+                                    if a != &b {
+                                        errors.push(validation_rule.clone())
+                                    }
+                                }
+                                (Some(Value::Array(a)), Some(Value::Array(b))) => {
+                                    if a != &b {
+                                        errors.push(validation_rule.clone())
+                                    }
+                                }
+                                _ => errors.push(validation_rule.clone()),
+                            }
+                        }
+                        ValidationRule::Different(data_path) => {
+                            let other_value = get(data_path.clone()).await;
+                            match (value, other_value) {
+                                (None, None) | (Some(Value::Null), Some(Value::Null)) => {
+                                    continue;
+                                }
+                                (Some(Value::Object(a)), Some(Value::Object(b))) => {
+                                    if a == &b {
+                                        errors.push(validation_rule.clone())
+                                    }
+                                }
+                                (Some(Value::Bool(a)), Some(Value::Bool(b))) => {
+                                    if a == &b {
+                                        errors.push(validation_rule.clone())
+                                    }
+                                }
+                                (Some(Value::Number(a)), Some(Value::Number(b))) => {
+                                    if a == &b {
+                                        errors.push(validation_rule.clone())
+                                    }
+                                }
+                                (Some(Value::String(a)), Some(Value::String(b))) => {
+                                    if a == &b {
+                                        errors.push(validation_rule.clone())
+                                    }
+                                }
+                                (Some(Value::Array(a)), Some(Value::Array(b))) => {
+                                    if a == &b {
+                                        errors.push(validation_rule.clone())
+                                    }
+                                }
+                                _ => continue,
+                            }
+                        }
+                        ValidationRule::OneOf(variants) => match value {
+                            Some(v) => {
+                                if !variants.iter().any(|i| i.0 == *v) {
+                                    errors.push(validation_rule.clone());
+                                }
+                            }
+                            None => {
+                                errors.push(validation_rule.clone());
+                            }
+                        },
+                        ValidationRule::NotOneOf(variants) => match value {
+                            Some(v) => {
+                                if !variants.iter().any(|i| i.0 == *v) {
+                                    errors.push(validation_rule.clone());
+                                }
+                            }
+                            None => {}
+                        },
+                        ValidationRule::Min(min) => match value {
+                            Some(Value::String(v)) => {
+                                if !(v.len() > *min as usize) {
+                                    errors.push(validation_rule.clone());
+                                }
+                            }
+                            _ => {
+                                errors.push(validation_rule.clone());
+                            }
+                        },
+                        ValidationRule::Max(max) => match value {
+                            Some(Value::String(v)) => {
+                                if !(v.len() < *max as usize) {
+                                    errors.push(validation_rule.clone());
+                                }
+                            }
+                            _ => {
+                                continue;
+                            }
+                        },
+                        ValidationRule::StartsWith(start) => match value {
+                            Some(Value::String(v)) => {
+                                if !v.starts_with(start) {
+                                    errors.push(validation_rule.clone());
+                                }
+                            }
+                            _ => {
+                                errors.push(validation_rule.clone());
+                            }
+                        },
+                        ValidationRule::DoesntStartWith(start) => match value {
+                            Some(Value::String(v)) => {
+                                if v.starts_with(start) {
+                                    errors.push(validation_rule.clone());
+                                }
+                            }
+                            _ => {
+                                errors.push(validation_rule.clone());
+                            }
+                        },
+                        ValidationRule::EndsWith(end) => match value {
+                            Some(Value::String(v)) => {
+                                if !v.ends_with(end) {
+                                    errors.push(validation_rule.clone());
+                                }
+                            }
+                            _ => {
+                                errors.push(validation_rule.clone());
+                            }
+                        },
+                        ValidationRule::DoesntEndWith(end) => match value {
+                            Some(Value::String(v)) => {
+                                if v.ends_with(end) {
+                                    errors.push(validation_rule.clone());
+                                }
+                            }
+                            _ => {
+                                errors.push(validation_rule.clone());
+                            }
+                        },
+                        ValidationRule::Email => match value {
+                            Some(Value::String(v)) => {
+                                if !is_valid_email(v) {
+                                    errors.push(validation_rule.clone());
+                                }
+                            }
+                            _ => {
+                                errors.push(validation_rule.clone());
+                            }
+                        },
+                        ValidationRule::HexColor => match value {
+                            Some(Value::String(v)) => {
+                                if !is_valid_hex_color(v) {
+                                    errors.push(validation_rule.clone());
+                                }
+                            }
+                            _ => {
+                                errors.push(validation_rule.clone());
+                            }
+                        },
+                        ValidationRule::Ip(ip) => match value {
+                            Some(Value::String(v)) => {
+                                if !is_valid_ip(v.as_str(), ip) {
+                                    errors.push(validation_rule.clone());
+                                }
+                            }
+                            _ => {
+                                errors.push(validation_rule.clone());
+                            }
+                        },
+                        ValidationRule::MAC => match value {
+                            Some(Value::String(v)) => {
+                                if !is_valid_mac_address(v) {
+                                    errors.push(validation_rule.clone());
+                                }
+                            }
+                            _ => {
+                                errors.push(validation_rule.clone());
+                            }
+                        },
+                        ValidationRule::JSON => match value {
+                            Some(Value::String(v)) => {
+                                if !is_valid_json(v) {
+                                    errors.push(validation_rule.clone());
+                                }
+                            }
+                            _ => {
+                                errors.push(validation_rule.clone());
+                            }
+                        },
+                        ValidationRule::Lowercase => match value {
+                            Some(Value::String(v)) => {
+                                if !v.chars().all(|c| !c.is_uppercase()) {
+                                    errors.push(validation_rule.clone());
+                                }
+                            }
+                            _ => {
+                                errors.push(validation_rule.clone());
+                            }
+                        },
+                        ValidationRule::Uppercase => match value {
+                            Some(Value::String(v)) => {
+                                if !v.chars().all(|c| c.is_uppercase()) {
+                                    errors.push(validation_rule.clone());
+                                }
+                            }
+                            _ => {
+                                errors.push(validation_rule.clone());
+                            }
+                        },
+                        ValidationRule::Regex(regex) => {
+                            match value {
+                                Some(Value::String(v)) => {
+                                    let re_opt = Regex::new(regex);
+                                    match re_opt {
+                                        Ok(re) => {
+                                            if !re.is_match(v) {
+                                                errors.push(validation_rule.clone());
+                                            }
+                                        }
+                                        Err(_) => {
+                                            // TODO: add tracing logs for err
+                                            errors.push(validation_rule.clone());
+                                        }
+                                    }
+                                }
+                                _ => {
+                                    errors.push(validation_rule.clone());
+                                }
+                            }
+                        }
+                        ValidationRule::NotRegex(regex) => {
+                            match value {
+                                Some(Value::String(v)) => {
+                                    let re_opt = Regex::new(regex);
+                                    match re_opt {
+                                        Ok(re) => {
+                                            if re.is_match(v) {
+                                                errors.push(validation_rule.clone());
+                                            }
+                                        }
+                                        Err(_) => {
+                                            // TODO: add tracing logs for err
+                                            errors.push(validation_rule.clone());
+                                        }
+                                    }
+                                }
+                                _ => {
+                                    errors.push(validation_rule.clone());
+                                }
+                            }
+                        }
+                        ValidationRule::URL => match value {
+                            Some(Value::String(v)) => {
+                                if !is_valid_url(v) {
+                                    errors.push(validation_rule.clone());
+                                }
+                            }
+                            _ => {
+                                errors.push(validation_rule.clone());
+                            }
+                        },
+                        ValidationRule::ULID => match value {
+                            Some(Value::String(v)) => {
+                                if !is_valid_ulid(v) {
+                                    errors.push(validation_rule.clone());
+                                }
+                            }
+                            _ => {
+                                errors.push(validation_rule.clone());
+                            }
+                        },
+                        ValidationRule::UUID(uuid_opt) => match value {
+                            Some(Value::String(v)) => {
+                                if !is_valid_uuid(v, uuid_opt) {
+                                    errors.push(validation_rule.clone());
+                                }
+                            }
+                            _ => {
+                                errors.push(validation_rule.clone());
+                            }
+                        },
+                        _ => {
+                            errors.push(validation_rule.clone());
+                        }
+                    }
+                }
+
+                if errors.len() > 0 {
+                    return Err(errors);
+                }
+
+                Ok(())
+            }
+            None => Ok(()),
+        }
     }
 
     fn is_live(&self) -> &LiveType {
