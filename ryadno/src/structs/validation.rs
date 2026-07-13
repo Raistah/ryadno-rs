@@ -1,11 +1,29 @@
-use std::{net::IpAddr, sync::Arc};
+use std::{any::Any, pin::Pin, sync::Arc};
 
+use linkme::distributed_slice;
 use rkyv::Archive;
 
-use crate::structs::{
-    data_path::DataPath,
-    rkyv::{datetime_wrapper::DateTimeWrapper, uuid_version_wrapper::UUIDVersionWrapper, value_wrapper::ValueWrapper},
+use crate::{
+    form::{FormContext, ValueGetter, ValueSetter},
+    structs::{
+        data_path::DataPath,
+        rkyv::{
+            datetime_wrapper::DateTimeWrapper, uuid_version_wrapper::UUIDVersionWrapper,
+            value_wrapper::ValueWrapper,
+        },
+    },
 };
+
+#[distributed_slice]
+#[linkme(crate = crate::linkme)]
+pub static RYADNO_FIELDS_VALIDATION_CLOUSRES: [(&'static str, ValidationClosure)];
+pub type ValidationClosure = for<'a> fn(
+    DataPath: Arc<DataPath>,
+    form_context: Arc<FormContext>,
+    runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
+    get: ValueGetter<'a>,
+    set: ValueSetter<'a>,
+) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>>;
 
 #[derive(Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone)]
 pub enum ValidationRule {
@@ -85,9 +103,8 @@ pub enum ValidationRule {
     // IsImage,
     // MIMETypes,
 
-
     // Custom works in the same way as field closures
-    Custom(String)
+    Custom(String),
 }
 
 impl PartialEq for ValidationRule {
@@ -105,25 +122,25 @@ impl PartialEq for ValidationRule {
 
             (Self::Accepted, Self::Accepted) => true,
             (
-                Self::AcceptedIf{
+                Self::AcceptedIf {
                     data_path: a,
-                    value: b
+                    value: b,
                 },
-                Self::AcceptedIf{
+                Self::AcceptedIf {
                     data_path: c,
-                    value: d
-                }
+                    value: d,
+                },
             ) => a == c && b == d,
             (Self::Declined, Self::Declined) => true,
             (
-                Self::DeclinedIf{
+                Self::DeclinedIf {
                     data_path: a,
-                    value: b
+                    value: b,
                 },
-                Self::DeclinedIf{
+                Self::DeclinedIf {
                     data_path: c,
-                    value: d
-                }
+                    value: d,
+                },
             ) => a == c && b == d,
 
             (Self::StartsWith(a), Self::StartsWith(b)) => a == b,

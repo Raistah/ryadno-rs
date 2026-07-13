@@ -19,7 +19,7 @@ use crate::{
         field_change,
         form_content::FormContent,
         update_event::{Debounce, Throttle, UpdateBehavior, UpdateEvent},
-        validation::{ExpectedType, ValidationRule},
+        validation::{ExpectedType, RYADNO_FIELDS_VALIDATION_CLOUSRES, ValidationRule},
     },
     utils::{
         capitalize_first, is_valid_email, is_valid_hex_color, is_valid_ip, is_valid_mac_address,
@@ -905,6 +905,27 @@ impl Field for TextField {
                                 errors.push(validation_rule.clone());
                             }
                         },
+                        ValidationRule::Custom(handler) => {
+                            match RYADNO_FIELDS_VALIDATION_CLOUSRES
+                                .iter()
+                                .find(|closure| closure.0 == handler.as_str())
+                            {
+                                Some(closure) => {
+                                    if !(closure.1)(
+                                        self.get_data_path(),
+                                        form_context.clone(),
+                                        runtime_ctx.clone(),
+                                        get.clone(),
+                                        set.clone(),
+                                    )
+                                    .await
+                                    {
+                                        errors.push(validation_rule.clone());
+                                    }
+                                }
+                                None => {}
+                            }
+                        }
                         _ => {
                             errors.push(validation_rule.clone());
                         }
