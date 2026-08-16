@@ -10,8 +10,7 @@ use uuid::Uuid;
 use crate::{
     fields::{BoolValue, Field, LiveType, prepare_value_for_datastar},
     form::{
-        ChangePusher, FormContext, RenderRegistryPusher, Update, UpdateType, ValueGetter,
-        ValueSetter,
+        ChangePusher, ErrorInserter, FormContext, RenderRegistryPusher, Update, UpdateType, ValueGetter, ValueSetter
     },
     structs::{
         data_path::DataPath,
@@ -59,7 +58,7 @@ pub struct TextField {
     autofocus: BoolValue,
     is_autofocus: bool,
     column_span: u8,
-    validation_rules: Option<Vec<ValidationRule>>,
+    validation_rules: Option<Arc<Vec<ValidationRule>>>,
 
     above_label_content: FormContent,
     above_label_content_cached: Option<String>,
@@ -135,6 +134,11 @@ impl TextField {
 
     pub fn update_event(mut self, value: UpdateEvent) -> Self {
         self.update_behavior.event = value;
+        self
+    }
+
+    pub fn set_validation_rules(mut self, rules: Vec<ValidationRule>) -> Self {
+        self.validation_rules = Some(Arc::new(rules));
         self
     }
 
@@ -587,14 +591,18 @@ impl Field for TextField {
         )
     }
 
+    fn get_validation_rules(&self) -> Option<Arc<Vec<ValidationRule>>> {
+        self.validation_rules.clone()
+    }
+
     async fn validate<'a>(
         &self,
-        value: Option<&serde_json::Value>,
         form_context: Arc<FormContext>,
         runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
         get: ValueGetter<'a>,
-        set: ValueSetter<'a>,
-    ) -> Result<(), Vec<ValidationRule>> {
+        insert: ErrorInserter<'a>
+    ) {
+        let value = get(self.get_data_path()).await;
         match &self.validation_rules {
             Some(validation_rules) => {
                 let mut errors: Vec<ValidationRule> = Vec::new();
@@ -606,7 +614,7 @@ impl Field for TextField {
                                 errors.push(validation_rule.clone())
                             }
                         }
-                        ValidationRule::Is(expected_type) => match (expected_type, value) {
+                        ValidationRule::Is(expected_type) => match (expected_type, &value) {
                             (ExpectedType::Null, Some(Value::Null))
                             | (ExpectedType::Bool, Some(Value::Bool(_)))
                             | (ExpectedType::Number, Some(Value::Number(_)))
@@ -619,7 +627,7 @@ impl Field for TextField {
                         },
                         ValidationRule::Same(data_path) => {
                             let other_value = get(data_path.clone()).await;
-                            match (value, other_value) {
+                            match (&value, other_value) {
                                 (None, None) | (Some(Value::Null), Some(Value::Null)) => {
                                     continue;
                                 }
@@ -653,7 +661,7 @@ impl Field for TextField {
                         }
                         ValidationRule::Different(data_path) => {
                             let other_value = get(data_path.clone()).await;
-                            match (value, other_value) {
+                            match (&value, other_value) {
                                 (None, None) | (Some(Value::Null), Some(Value::Null)) => {
                                     continue;
                                 }
@@ -685,7 +693,7 @@ impl Field for TextField {
                                 _ => continue,
                             }
                         }
-                        ValidationRule::OneOf(variants) => match value {
+                        ValidationRule::OneOf(variants) => match &value {
                             Some(v) => {
                                 if !variants.iter().any(|i| i.0 == *v) {
                                     errors.push(validation_rule.clone());
@@ -695,7 +703,7 @@ impl Field for TextField {
                                 errors.push(validation_rule.clone());
                             }
                         },
-                        ValidationRule::NotOneOf(variants) => match value {
+                        ValidationRule::NotOneOf(variants) => match &value {
                             Some(v) => {
                                 if !variants.iter().any(|i| i.0 == *v) {
                                     errors.push(validation_rule.clone());
@@ -703,9 +711,9 @@ impl Field for TextField {
                             }
                             None => {}
                         },
-                        ValidationRule::Min(min) => match value {
+                        ValidationRule::Min(min) => match &value {
                             Some(Value::String(v)) => {
-                                if !(v.len() > *min as usize) {
+                                if !(v.len() >= *min as usize) {
                                     errors.push(validation_rule.clone());
                                 }
                             }
@@ -713,9 +721,9 @@ impl Field for TextField {
                                 errors.push(validation_rule.clone());
                             }
                         },
-                        ValidationRule::Max(max) => match value {
+                        ValidationRule::Max(max) => match &value {
                             Some(Value::String(v)) => {
-                                if !(v.len() < *max as usize) {
+                                if !(v.len() <= *max as usize) {
                                     errors.push(validation_rule.clone());
                                 }
                             }
@@ -723,7 +731,7 @@ impl Field for TextField {
                                 continue;
                             }
                         },
-                        ValidationRule::StartsWith(start) => match value {
+                        ValidationRule::StartsWith(start) => match &value {
                             Some(Value::String(v)) => {
                                 if !v.starts_with(start) {
                                     errors.push(validation_rule.clone());
@@ -733,7 +741,7 @@ impl Field for TextField {
                                 errors.push(validation_rule.clone());
                             }
                         },
-                        ValidationRule::DoesntStartWith(start) => match value {
+                        ValidationRule::DoesntStartWith(start) => match &value {
                             Some(Value::String(v)) => {
                                 if v.starts_with(start) {
                                     errors.push(validation_rule.clone());
@@ -743,7 +751,7 @@ impl Field for TextField {
                                 errors.push(validation_rule.clone());
                             }
                         },
-                        ValidationRule::EndsWith(end) => match value {
+                        ValidationRule::EndsWith(end) => match &value {
                             Some(Value::String(v)) => {
                                 if !v.ends_with(end) {
                                     errors.push(validation_rule.clone());
@@ -753,7 +761,7 @@ impl Field for TextField {
                                 errors.push(validation_rule.clone());
                             }
                         },
-                        ValidationRule::DoesntEndWith(end) => match value {
+                        ValidationRule::DoesntEndWith(end) => match &value {
                             Some(Value::String(v)) => {
                                 if v.ends_with(end) {
                                     errors.push(validation_rule.clone());
@@ -763,7 +771,7 @@ impl Field for TextField {
                                 errors.push(validation_rule.clone());
                             }
                         },
-                        ValidationRule::Email => match value {
+                        ValidationRule::Email => match &value {
                             Some(Value::String(v)) => {
                                 if !is_valid_email(v) {
                                     errors.push(validation_rule.clone());
@@ -773,7 +781,7 @@ impl Field for TextField {
                                 errors.push(validation_rule.clone());
                             }
                         },
-                        ValidationRule::HexColor => match value {
+                        ValidationRule::HexColor => match &value {
                             Some(Value::String(v)) => {
                                 if !is_valid_hex_color(v) {
                                     errors.push(validation_rule.clone());
@@ -783,7 +791,7 @@ impl Field for TextField {
                                 errors.push(validation_rule.clone());
                             }
                         },
-                        ValidationRule::Ip(ip) => match value {
+                        ValidationRule::Ip(ip) => match &value {
                             Some(Value::String(v)) => {
                                 if !is_valid_ip(v.as_str(), ip) {
                                     errors.push(validation_rule.clone());
@@ -793,7 +801,7 @@ impl Field for TextField {
                                 errors.push(validation_rule.clone());
                             }
                         },
-                        ValidationRule::MAC => match value {
+                        ValidationRule::MAC => match &value {
                             Some(Value::String(v)) => {
                                 if !is_valid_mac_address(v) {
                                     errors.push(validation_rule.clone());
@@ -803,7 +811,7 @@ impl Field for TextField {
                                 errors.push(validation_rule.clone());
                             }
                         },
-                        ValidationRule::JSON => match value {
+                        ValidationRule::JSON => match &value {
                             Some(Value::String(v)) => {
                                 if !is_valid_json(v) {
                                     errors.push(validation_rule.clone());
@@ -813,7 +821,7 @@ impl Field for TextField {
                                 errors.push(validation_rule.clone());
                             }
                         },
-                        ValidationRule::Lowercase => match value {
+                        ValidationRule::Lowercase => match &value {
                             Some(Value::String(v)) => {
                                 if !v.chars().all(|c| !c.is_uppercase()) {
                                     errors.push(validation_rule.clone());
@@ -823,7 +831,7 @@ impl Field for TextField {
                                 errors.push(validation_rule.clone());
                             }
                         },
-                        ValidationRule::Uppercase => match value {
+                        ValidationRule::Uppercase => match &value {
                             Some(Value::String(v)) => {
                                 if !v.chars().all(|c| c.is_uppercase()) {
                                     errors.push(validation_rule.clone());
@@ -834,7 +842,7 @@ impl Field for TextField {
                             }
                         },
                         ValidationRule::Regex(regex) => {
-                            match value {
+                            match &value {
                                 Some(Value::String(v)) => {
                                     let re_opt = Regex::new(regex);
                                     match re_opt {
@@ -855,7 +863,7 @@ impl Field for TextField {
                             }
                         }
                         ValidationRule::NotRegex(regex) => {
-                            match value {
+                            match &value {
                                 Some(Value::String(v)) => {
                                     let re_opt = Regex::new(regex);
                                     match re_opt {
@@ -875,7 +883,7 @@ impl Field for TextField {
                                 }
                             }
                         }
-                        ValidationRule::URL => match value {
+                        ValidationRule::URL => match &value {
                             Some(Value::String(v)) => {
                                 if !is_valid_url(v) {
                                     errors.push(validation_rule.clone());
@@ -885,7 +893,7 @@ impl Field for TextField {
                                 errors.push(validation_rule.clone());
                             }
                         },
-                        ValidationRule::ULID => match value {
+                        ValidationRule::ULID => match &value {
                             Some(Value::String(v)) => {
                                 if !is_valid_ulid(v) {
                                     errors.push(validation_rule.clone());
@@ -895,7 +903,7 @@ impl Field for TextField {
                                 errors.push(validation_rule.clone());
                             }
                         },
-                        ValidationRule::UUID(uuid_opt) => match value {
+                        ValidationRule::UUID(uuid_opt) => match &value {
                             Some(Value::String(v)) => {
                                 if !is_valid_uuid(v, uuid_opt) {
                                     errors.push(validation_rule.clone());
@@ -916,7 +924,6 @@ impl Field for TextField {
                                         form_context.clone(),
                                         runtime_ctx.clone(),
                                         get.clone(),
-                                        set.clone(),
                                     )
                                     .await
                                     {
@@ -933,12 +940,10 @@ impl Field for TextField {
                 }
 
                 if errors.len() > 0 {
-                    return Err(errors);
+                    insert(self.get_data_path(), errors).await;
                 }
-
-                Ok(())
             }
-            None => Ok(()),
+            None => {},
         }
     }
 

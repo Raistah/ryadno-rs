@@ -4,7 +4,7 @@ use linkme::distributed_slice;
 use rkyv::Archive;
 
 use crate::{
-    form::{FormContext, ValueGetter, ValueSetter},
+    form::{FormContext, ValueGetter},
     structs::{
         data_path::DataPath,
         rkyv::{
@@ -18,11 +18,10 @@ use crate::{
 #[linkme(crate = crate::linkme)]
 pub static RYADNO_FIELDS_VALIDATION_CLOUSRES: [(&'static str, ValidationClosure)];
 pub type ValidationClosure = for<'a> fn(
-    DataPath: Arc<DataPath>,
+    data_path: Arc<DataPath>,
     form_context: Arc<FormContext>,
     runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
     get: ValueGetter<'a>,
-    set: ValueSetter<'a>,
 ) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>>;
 
 #[derive(Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone)]
@@ -186,6 +185,8 @@ impl PartialEq for ValidationRule {
             (Self::BeforeOther(a), Self::BeforeOther(b)) => a == b,
             (Self::BeforeOrEqual(a), Self::BeforeOrEqual(b)) => a == b,
             (Self::BeforeOrEqualToOther(a), Self::BeforeOrEqualToOther(b)) => a == b,
+
+            (Self::Custom(a), Self::Custom(b)) => a == b,
 
             _ => false,
         }

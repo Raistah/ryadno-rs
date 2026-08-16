@@ -8,6 +8,7 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::{
+    error_map_inserter,
     fields::{Field, LiveType},
     push_change, render_registry_pusher,
     structs::{
@@ -15,6 +16,7 @@ use crate::{
         error::Error,
         field_change::{self, FieldChange},
         rkyv::value_wrapper::ValueWrapper,
+        validation::ValidationRule,
     },
     value_getter, value_setter,
 };
@@ -247,6 +249,50 @@ where
     ) -> Vec<FieldChange> {
         self.handle_update::<()>(update, mjenv, None).await
     }
+
+    pub async fn validate<'a, C: Any + Sync + Send>(
+        &mut self,
+        runtime_ctx: impl Into<Option<Arc<C>>>,
+    ) -> HashMap<DataPath, Vec<ValidationRule>> {
+        let errors: Arc<Mutex<HashMap<DataPath, Vec<ValidationRule>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let errors_clone = errors.clone();
+        let errors_inserter = error_map_inserter!(errors_clone);
+
+        let ctx_opt = runtime_ctx.into();
+        let ctx: Option<Arc<dyn Any + Send + Sync>> =
+            ctx_opt.map(|arc_c| arc_c as Arc<dyn Any + Send + Sync>);
+
+        let value_amx = match &mut self.data {
+            Some(value) => Arc::new(Mutex::new(std::mem::take(&mut value.0))),
+            None => Arc::new(Mutex::new(Value::Null)),
+        };
+
+        let value_amx_clone = value_amx.clone();
+        let getter: ValueGetter = value_getter!(value_amx_clone);
+
+        for field in self.schema.iter_mut() {
+            field
+                .validate(
+                    self.form_ctx.clone(),
+                    ctx.clone(),
+                    getter.clone(),
+                    errors_inserter.clone(),
+                )
+                .await;
+        }
+
+        // if errors_inserter isn't dropped, the closure will contain Arc that will fail unwrap
+        drop(errors_inserter);
+
+        Arc::try_unwrap(errors)
+            .expect("Cannot unwrap errors, other Arc references still exists")
+            .into_inner()
+    }
+
+    pub async fn validate_no_ctx(&mut self) -> HashMap<DataPath, Vec<ValidationRule>> {
+        self.validate::<()>(None).await
+    }
 }
 
 pub type ValueGetter<'a> =
@@ -357,6 +403,27 @@ macro_rules! push_change {
     };
 }
 
+pub type ErrorInserter<'a> =
+    Arc<dyn Fn(Arc<DataPath>, Vec<ValidationRule>) -> BoxFuture<'a, ()> + Send + Sync>;
+#[macro_export]
+macro_rules! error_map_inserter {
+    ($errors:expr) => {
+        Arc::new(
+            move |data_path: std::sync::Arc<$crate::structs::data_path::DataPath>,
+                  rules: std::vec::Vec<$crate::structs::validation::ValidationRule>|
+                  -> BoxFuture<()> {
+                let errors_handle = Arc::clone(&$errors);
+
+                async move {
+                    let mut errors_lock = errors_handle.lock().await;
+                    errors_lock.insert((*data_path).clone(), rules);
+                }
+                .boxed()
+            },
+        )
+    };
+}
+
 #[macro_export]
 macro_rules! to_bytes {
     ($from:expr) => {
@@ -408,9 +475,46 @@ pub enum UpdateType {
     Action(Value),
 }
 
+// TODO: To better process updates it is better to handle them completely separate. Probably i'll be able to optimize handle_update
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+pub enum UpdateTypeTmp {
+    Value(ValueUpdate),
+    Action(ActionUpdate),
+    FieldAction(FieldActionUpdate),
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+pub struct ValueUpdate {
+    field_uuid: String,
+    path: DataPath,
+    value: Value,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+pub struct ActionUpdate {
+    action_uuid: String,
+    details: Value,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+pub struct FieldActionUpdate {
+    field_uuid: String,
+    action_uuid: String,
+    path: DataPath,
+    details: Value,
+}
+
 #[cfg(test)]
 mod test {
-    use crate::{async_closure, structs::field_dep::FieldDep};
+    use crate::{
+        async_closure,
+        structs::{
+            field_dep::FieldDep,
+            validation::{
+                ExpectedType, IpVersion, RYADNO_FIELDS_VALIDATION_CLOUSRES, ValidationClosure,
+            },
+        },
+    };
     use linkme::distributed_slice;
     use minijinja::{Environment, path_loader};
     use serde_json::json;
@@ -574,5 +678,202 @@ mod test {
             changes[0].data_path,
             *form.schema.get(3).unwrap().get_data_path()
         );
+    }
+
+    #[distributed_slice(RYADNO_FIELDS_VALIDATION_CLOUSRES)]
+    pub static TEST_VALIDATION_TEXT_FIELD_CLOSURE_1: (&'static str, ValidationClosure) = (
+        "TEST_VALIDATION_TEXT_FIELD_CLOSURE_1",
+        async_closure!((_, _, _, _) {
+            false
+        }),
+    );
+
+    #[distributed_slice(RYADNO_FIELDS_VALIDATION_CLOUSRES)]
+    pub static TEST_VALIDATION_TEXT_FIELD_CLOSURE_2: (&'static str, ValidationClosure) = (
+        "TEST_VALIDATION_TEXT_FIELD_CLOSURE_2",
+        async_closure!((_, _, _, _) {
+            true
+        }),
+    );
+
+    // TODO: consider to move it to the text field module
+    #[tokio::test]
+    async fn test_validation_text_field() {
+        let mut form: Form<FieldTypes> = Form::new(
+            vec![
+                TextField::make("test_text_1".to_string())
+                    .set_validation_rules(vec![
+                        // Required
+                        ValidationRule::Required,
+                        // IS
+                        ValidationRule::Is(ExpectedType::Null),
+                        ValidationRule::Is(ExpectedType::Bool),
+                        ValidationRule::Is(ExpectedType::Number),
+                        ValidationRule::Is(ExpectedType::String),
+                        ValidationRule::Is(ExpectedType::Array),
+                        ValidationRule::Is(ExpectedType::Object),
+                        // Same
+                        ValidationRule::Same(Arc::new(DataPath::from("test_text_2"))),
+                        ValidationRule::Same(Arc::new(DataPath::from("test_text_array"))),
+                        // Different
+                        ValidationRule::Different(Arc::new(DataPath::from("test_text_2"))),
+                        ValidationRule::Different(Arc::new(DataPath::from("test_text_array"))),
+                        // OneOf
+                        ValidationRule::OneOf(vec![
+                            Value::String("some specific string".into()).into(),
+                            Value::String("some not so specific string".into()).into(),
+                        ]),
+                        ValidationRule::OneOf(vec![
+                            Value::String("hehe".into()).into(),
+                            Value::String("hoho".into()).into(),
+                        ]),
+                        // NotOneOf
+                        ValidationRule::NotOneOf(vec![
+                            Value::String("some specific string".into()).into(),
+                            Value::String("some not so specific string".into()).into(),
+                        ]),
+                        ValidationRule::NotOneOf(vec![
+                            Value::String("hehe".into()).into(),
+                            Value::String("hoho".into()).into(),
+                        ]),
+                        // Min
+                        ValidationRule::Min(2.0),
+                        ValidationRule::Min(30.0),
+                        // Max
+                        ValidationRule::Max(2.0),
+                        ValidationRule::Max(30.0),
+                        // StartsWith
+                        ValidationRule::StartsWith("some specific".into()),
+                        ValidationRule::StartsWith("some not so specific".into()),
+                        // DoesntStartWith
+                        ValidationRule::DoesntStartWith("some specific".into()),
+                        ValidationRule::DoesntStartWith("some not so specific".into()),
+                        // EndsWith
+                        ValidationRule::EndsWith("string".into()),
+                        ValidationRule::EndsWith("hehe".into()),
+                        // DoesntEndWith
+                        ValidationRule::DoesntEndWith("string".into()),
+                        ValidationRule::DoesntEndWith("hehe".into()),
+                        // Email
+                        ValidationRule::Email,
+                        // HexColor
+                        ValidationRule::HexColor,
+                        // Ip
+                        ValidationRule::Ip(None),
+                        ValidationRule::Ip(Some(IpVersion::V4)),
+                        ValidationRule::Ip(Some(IpVersion::V6)),
+                        // MAC
+                        ValidationRule::MAC,
+                        // JSON
+                        ValidationRule::JSON,
+                        // Lowercase
+                        ValidationRule::Lowercase,
+                        // Uppercase
+                        ValidationRule::Uppercase,
+                        // Regex
+                        ValidationRule::Regex(r#".*specific.*"#.into()),
+                        ValidationRule::Regex(r#".*not so specific.*"#.into()),
+                        // NotRegex
+                        ValidationRule::NotRegex(r#".*specific.*"#.into()),
+                        ValidationRule::NotRegex(r#".*not so specific.*"#.into()),
+                        // URL
+                        ValidationRule::URL,
+                        // ULID
+                        ValidationRule::ULID,
+                        //Custom
+                        ValidationRule::Custom("TEST_VALIDATION_TEXT_FIELD_CLOSURE_1".into()),
+                        ValidationRule::Custom("TEST_VALIDATION_TEXT_FIELD_CLOSURE_2".into()),
+                    ])
+                    .into(),
+                TextField::make("test_text_email".into())
+                    .set_validation_rules(vec![ValidationRule::Email])
+                    .into(),
+                TextField::make("test_text_hexcolor".into())
+                    .set_validation_rules(vec![ValidationRule::HexColor])
+                    .into(),
+                TextField::make("test_text_ipv4".into())
+                    .set_validation_rules(vec![ValidationRule::Ip(Some(IpVersion::V4))])
+                    .into(),
+                TextField::make("test_text_ipv6".into())
+                    .set_validation_rules(vec![ValidationRule::Ip(Some(IpVersion::V6))])
+                    .into(),
+                TextField::make("test_text_mac".into())
+                    .set_validation_rules(vec![ValidationRule::MAC])
+                    .into(),
+                TextField::make("test_text_json".into())
+                    .set_validation_rules(vec![ValidationRule::JSON])
+                    .into(),
+                TextField::make("test_text_url".into())
+                    .set_validation_rules(vec![ValidationRule::URL])
+                    .into(),
+                TextField::make("test_text_ulid".into())
+                    .set_validation_rules(vec![ValidationRule::ULID])
+                    .into(),
+            ],
+            Arc::new(FormContext::new(
+                "".to_string(),
+                HashMap::new(),
+                HashMap::new(),
+            )),
+            Some(ValueWrapper(json!({
+                "test_text_1": "some specific string",
+                "test_text_2": "some specific string",
+                "test_text_array": [
+                    "hehe",
+                    "hoho"
+                ],
+                "test_text_email": "hehe@hoho.haha",
+                "test_text_hexcolor": "#000000",
+                "test_text_ipv4": "127.0.0.1",
+                "test_text_ipv6": "2001:0db8:85a3:0000:0000:8a2e:0370:7334",
+                "test_text_mac": "00:1A:2B:3C:4D:5E",
+                "test_text_json": r#"[{"hehe": "hoho"}]"#,
+                "test_text_url": "https://hehe.com/",
+                "test_text_ulid": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            }))),
+        );
+
+        let errors = form.validate_no_ctx().await;
+        let mut expected_errors: HashMap<DataPath, Vec<ValidationRule>> = HashMap::new();
+        expected_errors.insert(
+            DataPath::from("test_text_1"),
+            vec![
+                ValidationRule::Is(ExpectedType::Null),
+                ValidationRule::Is(ExpectedType::Bool),
+                ValidationRule::Is(ExpectedType::Number),
+                ValidationRule::Is(ExpectedType::Array),
+                ValidationRule::Is(ExpectedType::Object),
+                ValidationRule::Same(Arc::new(DataPath::from("test_text_array"))),
+                ValidationRule::Different(Arc::new(DataPath::from("test_text_2"))),
+                ValidationRule::OneOf(vec![
+                    Value::String("hehe".into()).into(),
+                    Value::String("hoho".into()).into(),
+                ]),
+                ValidationRule::NotOneOf(vec![
+                    Value::String("hehe".into()).into(),
+                    Value::String("hoho".into()).into(),
+                ]),
+                ValidationRule::Min(30.0),
+                ValidationRule::Max(2.0),
+                ValidationRule::StartsWith("some not so specific".into()),
+                ValidationRule::DoesntStartWith("some specific".into()),
+                ValidationRule::EndsWith("hehe".into()),
+                ValidationRule::DoesntEndWith("string".into()),
+                ValidationRule::Email,
+                ValidationRule::HexColor,
+                ValidationRule::Ip(None),
+                ValidationRule::Ip(Some(IpVersion::V4)),
+                ValidationRule::Ip(Some(IpVersion::V6)),
+                ValidationRule::MAC,
+                ValidationRule::JSON,
+                ValidationRule::Uppercase,
+                ValidationRule::Regex(r#".*not so specific.*"#.into()),
+                ValidationRule::NotRegex(r#".*specific.*"#.into()),
+                ValidationRule::URL,
+                ValidationRule::ULID,
+                ValidationRule::Custom("TEST_VALIDATION_TEXT_FIELD_CLOSURE_1".into()),
+            ],
+        );
+        assert_eq!(errors, expected_errors);
     }
 }

@@ -3,7 +3,6 @@ pub mod error;
 pub mod field_change;
 pub mod field_dep;
 pub mod form_content;
-pub mod register_page;
 pub mod update_event;
 pub mod validation;
 pub mod rkyv;

@@ -11,7 +11,10 @@ use serde_json::Value;
 
 use crate::{
     fields::text_input::TextField,
-    form::{ChangePusher, FormContext, RenderRegistryPusher, Update, ValueGetter, ValueSetter},
+    form::{
+        ChangePusher, ErrorInserter, FormContext, RenderRegistryPusher, Update, ValueGetter,
+        ValueSetter,
+    },
     structs::{data_path::DataPath, error::Error, field_dep::FieldDep, validation::ValidationRule},
 };
 
@@ -70,14 +73,16 @@ pub trait Field: Archive + Debug + Eq + PartialEq {
         push: ChangePusher,
     );
 
+    fn get_validation_rules(&self) -> Option<Arc<Vec<ValidationRule>>>;
+
     async fn validate<'a>(
         &self,
-        value: Option<&serde_json::Value>,
         form_context: Arc<FormContext>,
         runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
         get: ValueGetter<'a>,
-        set: ValueSetter<'a>,
-    ) -> Result<(), Vec<ValidationRule>>;
+        insert: ErrorInserter<'a>,
+    );
+
     fn get_name(&self) -> &str;
     fn get_uuid(&self) -> &str;
     fn is_live(&self) -> &LiveType;
@@ -193,21 +198,26 @@ macro_rules! register_field_type_enum {
                 }
             }
 
+
+            fn get_validation_rules(&self) -> Option<Arc<Vec<ValidationRule>>> {
+                match self {
+	                $(Self::$variant(v) => v.get_validation_rules()),*
+	            }
+            }
+
             async fn validate<'a>(
                 &self,
-                value: Option<&serde_json::Value>,
                 form_context: Arc<FormContext>,
                 runtime_ctx: Option<Arc<dyn Any + Sync + Send>>,
                 get: ValueGetter<'a>,
-                set: ValueSetter<'a>,
-            ) -> Result<(), Vec<ValidationRule>> {
+                insert: $crate::form::ErrorInserter<'a>,
+            ) {
                 match self {
                     $(Self::$variant(v) => v.validate(
-                        value,
                         form_context,
                         runtime_ctx,
                         get,
-                        set,
+                        insert,
                     ).await),*
                 }
             }

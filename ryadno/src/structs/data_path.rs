@@ -4,14 +4,14 @@ use rkyv::Archive;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
-#[derive(Debug, Clone, Archive, rkyv::Serialize, rkyv::Deserialize, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Archive, rkyv::Serialize, rkyv::Deserialize, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(from = "String")]
 pub struct DataPath {
     segments: Vec<Segment>,
     is_absolute: bool,
 }
 
-#[derive(Debug, Clone, Archive, rkyv::Serialize, rkyv::Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Archive, rkyv::Serialize, rkyv::Deserialize, Serialize, PartialEq, Eq, Hash)]
 pub enum Segment {
     Index(usize),
     Key(String),
